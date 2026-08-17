@@ -1,0 +1,6 @@
+# Salidas generadas del dashboard de ventas (se regeneran desde el Excel)
+ventas/dashboard_ventas_*.html
+ventas/data/
+*.pyc
+__pycache__/
+.DS_Store
