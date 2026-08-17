@@ -1,6 +1,12 @@
 # Salidas generadas del dashboard de ventas (se regeneran desde el Excel)
 ventas/dashboard_ventas_*.html
 ventas/data/
+ventas/node_modules/
+ventas/package-lock.json
+ventas/assets/vendor/
+# Excels de facturación (datos de la empresa: no van al repo)
+*.xlsx
+*.xls
 *.pyc
 __pycache__/
 .DS_Store

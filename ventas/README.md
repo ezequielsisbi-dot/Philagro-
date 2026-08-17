@@ -5,6 +5,17 @@ internet, sin CDN) a partir del Excel de facturación. Proyecto
 **independiente** del dashboard de cobranzas: no comparte ni pisa sus
 archivos — todo vive bajo esta carpeta (`ventas/`).
 
+## Instalación (una sola vez)
+
+```bash
+pip install pandas openpyxl
+cd ventas && npm install        # trae Chart.js, que se inyecta inline en el HTML
+```
+
+Chart.js **no** se commitea al repo: se instala con `npm install` y el
+generador lo **inyecta inline** en cada dashboard. El HTML resultante queda
+100 % autocontenido (sin CDN, sin fetch, se abre con doble clic offline).
+
 ## Uso
 
 ```bash
@@ -91,12 +102,13 @@ según las fechas de los datos).
 
 ```
 ventas/
-  ventas_dashboard.py        generador (Python + pandas)
-  verificar_ventas.mjs       verificador (Node + Playwright headless)
+  ventas_dashboard.py           generador (Python + pandas)
+  verificar_ventas.mjs          verificador (Node + Playwright headless)
+  package.json                  dependencia Chart.js (se inyecta inline)
   assets/plantilla_ventas.html  plantilla con el motor de filtros/tablas/
-                                 gráficos (Chart.js vendorizado inline) y
-                                 el placeholder /*__DATOS_JS__*/ donde se
-                                 inyectan los datos como JSON embebido
+                                gráficos y dos placeholders:
+                                  /*__DATOS_JS__*/  → datos JSON embebidos
+                                  /*__CHARTJS__*/   → Chart.js inline
   data/historico_ventas.json    histórico acumulado (se genera solo)
   dashboard_ventas_*.html       salidas generadas (se generan solas)
 ```

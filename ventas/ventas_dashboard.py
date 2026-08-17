@@ -32,6 +32,15 @@ TEMPLATE_PATH = BASE_DIR / "assets" / "plantilla_ventas.html"
 DATA_DIR = BASE_DIR / "data"
 HISTORICO_PATH = DATA_DIR / "historico_ventas.json"
 
+# Chart.js se inyecta INLINE en el HTML final (el dashboard queda autocontenido,
+# sin CDN ni fetch). Se busca primero una copia vendorizada en assets/vendor/ y,
+# si no está, la instalada por npm.
+CHARTJS_PATHS = [
+    BASE_DIR / "assets" / "vendor" / "chart.umd.min.js",
+    BASE_DIR / "node_modules" / "chart.js" / "dist" / "chart.umd.min.js",
+    BASE_DIR / "node_modules" / "chart.js" / "dist" / "chart.umd.js",
+]
+
 REQUIRED_COLS = [
     "Fechacomprobante", "Transacconsubtiponombre", "Comprobante", "Cliente",
     "Costo", "Condicionpago", "Moneda", "Vendedor", "Producto", "Cantidad",
@@ -250,6 +259,17 @@ def construir_payload(filas: list) -> dict:
 # Render de la plantilla
 # ---------------------------------------------------------------------------
 
+def cargar_chartjs() -> str:
+    for p in CHARTJS_PATHS:
+        if p.exists():
+            return p.read_text(encoding="utf-8")
+    raise SystemExit(
+        "ERROR: no se encontró Chart.js para vendorizar inline.\n"
+        f"  Buscado en:\n    " + "\n    ".join(str(p) for p in CHARTJS_PATHS) + "\n"
+        "  Solución: correr `npm install` dentro de ventas/ (una sola vez)."
+    )
+
+
 def render_html(payload: dict) -> str:
     if not TEMPLATE_PATH.exists():
         raise SystemExit(f"ERROR: no se encuentra la plantilla en {TEMPLATE_PATH}")
@@ -271,7 +291,12 @@ def render_html(payload: dict) -> str:
 
     if "/*__DATOS_JS__*/" not in template:
         raise SystemExit("ERROR: la plantilla no tiene el placeholder /*__DATOS_JS__*/")
-    return template.replace("/*__DATOS_JS__*/", bloque, 1)
+    if "/*__CHARTJS__*/" not in template:
+        raise SystemExit("ERROR: la plantilla no tiene el placeholder /*__CHARTJS__*/")
+
+    html = template.replace("/*__DATOS_JS__*/", bloque, 1)
+    html = html.replace("/*__CHARTJS__*/", cargar_chartjs(), 1)
+    return html
 
 
 def siguiente_nombre_libre(base: Path) -> Path:
