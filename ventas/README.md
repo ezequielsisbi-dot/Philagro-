@@ -33,6 +33,18 @@ node verificar_ventas.mjs dashboard_ventas_<archivo>.html
 (Si `node` no encuentra el módulo `playwright`, correr con
 `NODE_PATH=/opt/node22/lib/node_modules node verificar_ventas.mjs ...`)
 
+## Sembrar el histórico desde un dashboard viejo (una sola vez)
+
+Si ya tenés un dashboard generado antes, se puede arrancar el histórico
+desde ahí en lugar de reprocesar todos los Excel viejos:
+
+```bash
+python3 sembrar_historico.py dashboard_ventas_VIEJO.html
+```
+
+Lee los datos embebidos del HTML y arma `data/historico_ventas.json`.
+Se niega a pisar un histórico existente salvo que se pase `--forzar`.
+
 ## Actualización incremental (histórico)
 
 `ventas_dashboard.py` mantiene un histórico acumulado en
@@ -103,6 +115,7 @@ según las fechas de los datos).
 ```
 ventas/
   ventas_dashboard.py           generador (Python + pandas)
+  sembrar_historico.py          siembra el histórico desde un dashboard viejo
   verificar_ventas.mjs          verificador (Node + Playwright headless)
   package.json                  dependencia Chart.js (se inyecta inline)
   assets/plantilla_ventas.html  plantilla con el motor de filtros/tablas/
