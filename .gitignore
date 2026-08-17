@@ -1,0 +1,18 @@
+# PRIVACIDAD: los datos reales de cobranzas nunca se versionan.
+# Lo único con "datos" que entra al repo es el demo ficticio de demo/.
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+!demo/Cobranzas_demo.xlsx
+
+# Dashboards generados con datos reales.
+dashboard.html
+dashboard_*.html
+!demo/dashboard_demo.html
+
+# Varios
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/
