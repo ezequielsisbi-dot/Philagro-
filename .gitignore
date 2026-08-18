@@ -16,3 +16,10 @@ __pycache__/
 *.pyc
 .DS_Store
 node_modules/
+
+# Excepción pedida explícitamente por el usuario (18/08/2026): los Excel de
+# origen se guardan versionados en datos/. OJO: si el repositorio es público,
+# estos archivos quedan visibles para cualquiera y permanecen en el historial
+# de git aunque después se borren.
+!datos/
+!datos/*.xlsx
