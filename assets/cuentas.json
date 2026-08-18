@@ -7,13 +7,39 @@
     "Verificá el resultado con: python3 actualizar.py <archivo.xlsx> --cuentas"
   ],
   "reglas": [
-    { "patron": "caja +de +compensacion|caja +compensacion|compensacion", "concepto": "Caja Compensación" },
-    { "patron": "caja +chica|redondeo", "concepto": "Caja Chica" },
-    { "patron": "recaudador|rapipago|pago +facil|cobro +express|provincia +net", "concepto": "Valores en recaudadoras" },
-    { "patron": "echeq|e-?cheq|cheque|valores? +a? *depositar|valores? +en +cartera|valores? +diferidos?|^valores?\\b|cartera +de +valores", "concepto": "Valores (echeqs/cheques)" },
-    { "patron": "retencion|percepcion|impuesto|iibb|ii\\.bb|sicore|sircreb|ganancias|iva|sellos|ley +25413|deb\\.? *y *cred", "concepto": "Impuestos / retenciones" },
-    { "patron": "tarjeta|mercado *pago|mercadopago|visa|master|amex|cabal|naranja|plataforma|todo *pago|modo|uala|brubank", "concepto": "Tarjetas / plataformas" },
-    { "patron": "banco|^bco|transferencia|cta\\.? *cte|cuenta +corriente|caja +de +ahorro|santander|galicia|nacion|frances|bbva|hsbc|macro|patagonia|supervielle|itau|credicoop|comafi|icbc|hipotecario|ciudad|bind|industrial", "concepto": "Bancos / transferencias" }
+    {
+      "patron": "caja +de +compensacion|caja +compensacion|compensacion",
+      "concepto": "Caja Compensación"
+    },
+    {
+      "patron": "caja +chica|redondeo",
+      "concepto": "Caja Chica"
+    },
+    {
+      "patron": "^banco\\b|^bco\\b",
+      "concepto": "Bancos / transferencias",
+      "_nota": "Una cuenta que arranca con 'Banco' es el banco, aunque diga 'Recaudadora' (p. ej. 'Banco Frances Recaudadora'): ahí acreditan los valores, no son los valores."
+    },
+    {
+      "patron": "recaudador|rapipago|pago +facil|cobro +express|provincia +net",
+      "concepto": "Valores en recaudadoras"
+    },
+    {
+      "patron": "echeq|e-?cheq|cheque|valores? +a? *depositar|valores? +en +cartera|valores? +diferidos?|^valores?\\b|cartera +de +valores",
+      "concepto": "Valores (echeqs/cheques)"
+    },
+    {
+      "patron": "retencion|percepcion|impuesto|iibb|ii\\.bb|sicore|sircreb|ganancias|iva|sellos|ley +25413|deb\\.? *y *cred",
+      "concepto": "Impuestos / retenciones"
+    },
+    {
+      "patron": "tarjeta|mercado *pago|mercadopago|visa|master|amex|cabal|naranja|plataforma|todo *pago|modo|uala|brubank",
+      "concepto": "Tarjetas / plataformas"
+    },
+    {
+      "patron": "banco|^bco|transferencia|cta\\.? *cte|cuenta +corriente|caja +de +ahorro|santander|galicia|nacion|frances|bbva|hsbc|macro|patagonia|supervielle|itau|credicoop|comafi|icbc|hipotecario|ciudad|bind|industrial",
+      "concepto": "Bancos / transferencias"
+    }
   ],
   "por_defecto": "Otros"
 }

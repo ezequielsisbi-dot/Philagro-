@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import unicodedata
+import warnings
 from collections import Counter
 from typing import Any
 
@@ -159,8 +160,10 @@ ALIAS = {
                 "importe pesos", "importe ars", "monto", "importe original"),
     "fechavto": ("fechavto", "fecha vto", "fecha vencimiento", "vencimiento",
                  "fec vto", "fecha de vencimiento", "vto"),
-    "debe": ("debe",),
-    "haber": ("haber",),
+    # Ojo: sólo columnas de IMPORTE. La etiqueta "Debe/haber" no entra acá
+    # (los importes ya vienen firmados; ver criterio congelado #2).
+    "debe": ("debe", "debe importe"),
+    "haber": ("haber", "haber importe"),
 }
 
 
@@ -174,7 +177,9 @@ def mapear_encabezado(celdas: list[Any]) -> dict[str, int]:
         for campo, alias in ALIAS.items():
             if campo in cols:
                 continue
-            if nombre in alias or any(nombre.startswith(a) for a in alias):
+            # El alias tiene que cubrir palabras enteras: "fecha" matchea
+            # "Fecha cobro" pero NO "Fechavto" (que tiene su propio alias).
+            if any(re.fullmatch(a + r"(?:[ .\-]+\w+)*", nombre) for a in alias):
                 cols[campo] = i
                 break
     return cols
@@ -188,8 +193,17 @@ def leer_excel(ruta: str, mapa: MapaCuentas, verbose: bool = True) -> tuple[list
     except ImportError:
         sys.exit("Falta openpyxl. Instalalo con:  pip install openpyxl")
 
-    wb = load_workbook(ruta, read_only=True, data_only=True)
+    with warnings.catch_warnings():          # planillas sin estilo por defecto
+        warnings.simplefilter("ignore")
+        wb = load_workbook(ruta, read_only=True, data_only=True)
     hoja = wb[wb.sheetnames[0]]
+    # Varios exportadores declaran mal el rango usado (p. ej. "A1:A1"): en modo
+    # lectura rápida openpyxl le cree y devuelve una sola celda. Con
+    # reset_dimensions() se recorre lo que hay de verdad.
+    try:
+        hoja.reset_dimensions()
+    except AttributeError:
+        pass
     filas = list(hoja.iter_rows(values_only=True))
     wb.close()
 
