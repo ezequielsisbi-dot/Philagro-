@@ -829,9 +829,27 @@ __CHARTJS__
     const list = mount.querySelector(".ms-list");
     const search = mount.querySelector(".ms-search");
 
+    // Búsqueda tolerante: ignora mayúsculas, acentos, puntos y espacios de más,
+    // y pide que TODAS las palabras tipeadas aparezcan. Las razones sociales
+    // vienen escritas de mil formas ("S.R.L.", "S. R. L.", "SRL"), así que
+    // buscar carácter por carácter no encuentra nada.
+    const sinAcentos = (s) => String(s).toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const palabras = (s) => sinAcentos(s).replace(/[^a-z0-9]+/g, " ").trim();
+    const pegado = (s) => palabras(s).replace(/ /g, "");
+    // Cada opción guarda sus dos formas normalizadas (se calculan una sola vez).
+    const idx = opciones.map((o) => ({ o, pal: palabras(o.label), peg: pegado(o.label) }));
+    function coincide(e, q) {
+      const qPeg = pegado(q);
+      if (!qPeg) return true;
+      if (e.peg.includes(qPeg)) return true;          // "s.r.l." -> "srl"
+      return palabras(q).split(" ")                    // "south srl" -> las dos
+        .every((t) => e.pal.includes(t) || e.peg.includes(t));
+    }
+
     function pintar(filtro) {
-      const f = (filtro || "").toLowerCase();
-      const vis = f ? opciones.filter((o) => o.label.toLowerCase().includes(f)) : opciones;
+      const f = (filtro || "").trim();
+      const vis = f ? idx.filter((e) => coincide(e, f)).map((e) => e.o) : opciones;
       list.innerHTML = vis.length
         ? vis.map((o) => `<label class="ms-opt"><input type="checkbox" value="${escapeHtml(o.value)}" ${sel.has(o.value) ? "checked" : ""}><span>${escapeHtml(o.label)}</span></label>`).join("")
         : `<div class="ms-vacio">Sin resultados</div>`;
