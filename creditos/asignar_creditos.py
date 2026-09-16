@@ -1,0 +1,492 @@
+#!/usr/bin/env python3
+"""
+asignar_creditos.py -- Propuesta de limite de credito por cliente segun ventas y plazo.
+
+Uso:
+    python3 asignar_creditos.py <FACTURACION.xlsx>
+    python3 asignar_creditos.py <dashboard_ventas_XXX.html>
+    python3 asignar_creditos.py <historico_ventas.json>
+
+Salida: Excel `creditos_sugeridos_<fuente>.xlsx` + resumen por consola.
+
+La logica esta documentada en creditos/README.md. Resumen:
+cada factura ocupa credito desde su fecha hasta su vencimiento (fecha + plazo de
+su condicion de pago). El limite tiene que cubrir el pico de esa ocupacion.
+"""
+
+import argparse
+import json
+import re
+import sys
+import unicodedata
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+BASE_DIR = Path(__file__).resolve().parent
+
+REQUIRED_COLS = [
+    "Fechacomprobante", "Transacconsubtiponombre", "Comprobante", "Cliente",
+    "Costo", "Condicionpago", "Moneda", "Vendedor", "Producto", "Cantidad",
+    "Precio", "Importemonsecundaria", "Principioactivo",
+]
+
+NO_NUMERICO_CONTADO = {"CONTADO"}
+
+# Escalones comerciales de redondeo del limite (USD).
+ESCALONES = [(5_000, 500), (50_000, 1_000), (200_000, 5_000), (float("inf"), 10_000)]
+
+
+# ---------------------------------------------------------------------------
+# Criterios heredados del dashboard de ventas (congelados, no re-decidir)
+# ---------------------------------------------------------------------------
+
+def parsear_dias(condicion):
+    """CONTADO -> 0. Rango ("30-60 DIAS", "45-75-105") -> el MAXIMO.
+    No numerica (CANJE, PLATAFORMA, TARJETA, COMPENSACION, GRANOS, ...) -> None."""
+    if condicion is None:
+        return None
+    texto = str(condicion).strip().upper()
+    if not texto:
+        return None
+    numeros = [int(n) for n in re.findall(r"\d+", texto)]
+    if numeros:
+        return max(numeros)
+    if texto in NO_NUMERICO_CONTADO:
+        return 0
+    return None
+
+
+def precio_unitario(row):
+    tipo = str(row["Transacconsubtiponombre"]).strip() if pd.notna(row["Transacconsubtiponombre"]) else ""
+    if tipo == "Nota Liquido producto":
+        return float(row["Costo"]) if pd.notna(row["Costo"]) else 0.0
+    return float(row["Precio"]) if pd.notna(row["Precio"]) else 0.0
+
+
+def normalizar_comprobante(v):
+    try:
+        if float(v).is_integer():
+            return int(v)
+    except (TypeError, ValueError):
+        pass
+    return str(v).strip()
+
+
+# ---------------------------------------------------------------------------
+# Lectura: acepta Excel de facturacion, dashboard de ventas o historico JSON
+# ---------------------------------------------------------------------------
+
+def leer_excel(path):
+    df = pd.read_excel(path, engine="openpyxl")
+    faltantes = [c for c in REQUIRED_COLS if c not in df.columns]
+    if faltantes:
+        raise SystemExit(f"ERROR: al Excel le faltan columnas requeridas: {', '.join(faltantes)}")
+    df = df.dropna(subset=["Fechacomprobante", "Comprobante", "Cliente"])
+    out = pd.DataFrame()
+    out["fecha"] = pd.to_datetime(df["Fechacomprobante"])
+    out["comprobante"] = df["Comprobante"].map(normalizar_comprobante)
+    out["cliente"] = df["Cliente"].fillna("").astype(str).str.strip()
+    out["vendedor"] = df["Vendedor"].fillna("").astype(str).str.strip()
+    out["condicionpago"] = df["Condicionpago"].fillna("").astype(str).str.strip()
+    out["importe"] = pd.to_numeric(df["Importemonsecundaria"], errors="coerce").fillna(0.0)
+    return out
+
+
+def extraer_const(html, nombre):
+    patron = re.compile(r"const\s+" + nombre + r"\s*=\s*", re.MULTILINE)
+    m = patron.search(html)
+    if not m:
+        raise SystemExit(f"ERROR: no se encontro 'const {nombre}' en el HTML.")
+    inicio = m.end()
+    fin = html.index(";\n", inicio)
+    return json.loads(html[inicio:fin])
+
+
+def leer_dashboard_html(path):
+    html = Path(path).read_text(encoding="utf-8")
+    registros = extraer_const(html, "REGISTROS")
+    clientes = extraer_const(html, "CLIENTES")
+    vendedores = extraer_const(html, "VENDEDORES")
+    condiciones = extraer_const(html, "CONDICIONES")
+    filas = [{
+        "fecha": r["f"],
+        "comprobante": r["o"],
+        "cliente": clientes[r["c"]],
+        "vendedor": vendedores[r["v"]],
+        "condicionpago": condiciones[r["cp"]]["n"],
+        "importe": r["imp"],
+    } for r in registros]
+    df = pd.DataFrame(filas)
+    df["fecha"] = pd.to_datetime(df["fecha"])
+    return df
+
+
+def leer_historico_json(path):
+    filas = json.loads(Path(path).read_text(encoding="utf-8"))
+    df = pd.DataFrame([{
+        "fecha": f["fecha"],
+        "comprobante": f["comprobante"],
+        "cliente": f["cliente"],
+        "vendedor": f.get("vendedor", ""),
+        "condicionpago": f["condicionpago"],
+        "importe": f["importe"],
+    } for f in filas])
+    df["fecha"] = pd.to_datetime(df["fecha"])
+    return df
+
+
+def cargar(path):
+    p = Path(path)
+    if not p.exists():
+        raise SystemExit(f"ERROR: no existe el archivo {p}")
+    suf = p.suffix.lower()
+    if suf in (".xlsx", ".xlsm", ".xls"):
+        return leer_excel(p), "excel"
+    if suf in (".html", ".htm"):
+        return leer_dashboard_html(p), "dashboard"
+    if suf == ".json":
+        return leer_historico_json(p), "historico"
+    raise SystemExit(f"ERROR: extension no soportada ({suf}). Use .xlsx, .html o .json")
+
+
+# ---------------------------------------------------------------------------
+# Motor de exposicion: cuanto credito ocupa cada cliente, dia por dia
+# ---------------------------------------------------------------------------
+
+def serie_exposicion(facturas, dia_ini, dia_fin):
+    """Serie diaria de credito ocupado.
+
+    Cada factura ocupa credito desde su fecha (inclusive) hasta su vencimiento
+    (fecha + plazo, exclusive). Se arma con un array de diferencias y se acumula:
+    O(facturas + dias) en vez de O(facturas x dias).
+
+    Las notas de credito entran con importe negativo y liberan cupo solas.
+    Las facturas de CONTADO (plazo 0) no ocupan credito: no entran.
+    """
+    n = (dia_fin - dia_ini).days + 1
+    if n <= 0:
+        return np.zeros(0)
+    delta = np.zeros(n + 1)
+    for fecha, dias, importe in facturas:
+        if dias is None or pd.isna(dias) or dias <= 0:
+            continue
+        i = (fecha - dia_ini).days
+        j = i + int(dias)
+        if j <= 0 or i >= n:
+            continue
+        delta[max(i, 0)] += importe
+        if j < n:
+            delta[j] -= importe
+    return np.cumsum(delta[:n])
+
+
+def escalonar(monto):
+    """Redondea el limite al escalon comercial de arriba."""
+    if monto <= 0:
+        return 0
+    for tope, paso in ESCALONES:
+        if monto < tope:
+            return int(np.ceil(monto / paso) * paso)
+    return int(monto)
+
+
+def factor_antiguedad(meses, campanias):
+    """Cliente nuevo = menos limite hasta que haya historia que lo respalde."""
+    if meses >= 24 and campanias >= 2:
+        return 1.00
+    if meses >= 12:
+        return 0.90
+    if meses >= 6:
+        return 0.75
+    return 0.60
+
+
+def separar_codigo(nombre):
+    """Si el nombre del cliente trae el numero de cuenta adelante, lo separa."""
+    m = re.match(r"^\s*(\d{3,})\s*[-–]\s*(.+)$", nombre)
+    if m:
+        return m.group(1), m.group(2).strip()
+    return None, nombre
+
+
+def norm_texto(s):
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Z0-9]", "", s.upper())
+
+
+# ---------------------------------------------------------------------------
+# Analisis por cliente
+# ---------------------------------------------------------------------------
+
+def analizar(df, corte, meses_ventana, base_modo, crecimiento):
+    df = df.copy()
+    df["dias"] = df["condicionpago"].map(parsear_dias)
+
+    ini_ventana = corte - pd.DateOffset(months=meses_ventana)
+    ini_12m = corte - pd.DateOffset(months=12)
+
+    filas = []
+    for cliente, g in df.groupby("cliente", sort=False):
+        g12 = g[(g["fecha"] > ini_12m) & (g["fecha"] <= corte)]
+        gv = g[(g["fecha"] > ini_ventana) & (g["fecha"] <= corte)]
+
+        credito12 = g12.loc[g12["dias"].notna() & (g12["dias"] > 0), "importe"].sum()
+        contado12 = g12.loc[g12["dias"] == 0, "importe"].sum()
+        sinplazo12 = g12.loc[g12["dias"].isna(), "importe"].sum()
+        total12 = g12["importe"].sum()
+
+        # Plazo ponderado por USD, solo sobre ventas a credito y con importe positivo
+        # (las NC negativas distorsionarian el promedio; se netean en los volumenes).
+        cred = g[g["dias"].notna() & (g["dias"] > 0) & (g["importe"] > 0)]
+        cred_v = cred[(cred["fecha"] > ini_ventana) & (cred["fecha"] <= corte)]
+        base_plazo = cred_v if cred_v["importe"].sum() > 0 else cred
+        if base_plazo["importe"].sum() > 0:
+            plazo_pond = float(np.average(base_plazo["dias"], weights=base_plazo["importe"]))
+        else:
+            plazo_pond = 0.0
+
+        facturas = list(zip(gv["fecha"].dt.to_pydatetime(), gv["dias"], gv["importe"]))
+        dia_ini = ini_ventana.to_pydatetime()
+        serie = serie_exposicion(facturas, dia_ini, corte.to_pydatetime())
+        if serie.size:
+            exp_max = float(serie.max())
+            exp_p95 = float(np.percentile(serie, 95))
+            exp_hoy = float(serie[-1])
+            dias_con_saldo = int((serie > 0).sum())
+        else:
+            exp_max = exp_p95 = exp_hoy = 0.0
+            dias_con_saldo = 0
+
+        # Formula de rotacion: el saldo medio que sostiene ese volumen anual.
+        nec_media = credito12 * plazo_pond / 365.0 if plazo_pond > 0 else 0.0
+
+        if base_modo == "max":
+            base = max(exp_max, nec_media)
+        elif base_modo == "media":
+            base = nec_media
+        else:
+            base = max(exp_p95, nec_media)
+
+        primera = g["fecha"].min()
+        meses_rel = (corte.year - primera.year) * 12 + (corte.month - primera.month)
+        campanias = g["fecha"].dt.year.nunique()
+        gamma = factor_antiguedad(meses_rel, campanias)
+
+        limite = base * gamma * crecimiento
+        codigo, nombre = separar_codigo(cliente)
+
+        alertas = []
+        if sinplazo12 > 0:
+            alertas.append("ventas sin plazo definido (canje/granos/plataforma): decidir aparte")
+        if plazo_pond == 0 and credito12 == 0 and total12 != 0:
+            alertas.append("opera solo contado: no requiere linea")
+        if meses_rel < 12:
+            alertas.append(f"cliente nuevo ({meses_rel} meses de relacion)")
+        if exp_max > 0 and nec_media > 0 and exp_max / nec_media > 3:
+            alertas.append("muy estacional: el pico triplica al saldo medio")
+        if total12 < 0:
+            alertas.append("neto negativo en 12m (NC > facturas): revisar")
+
+        filas.append({
+            "nro": codigo,
+            "cliente": nombre,
+            "cliente_raw": cliente,
+            "vendedor": g["vendedor"].mode().iloc[0] if not g["vendedor"].mode().empty else "",
+            "ventas_credito_12m": credito12,
+            "ventas_contado_12m": contado12,
+            "ventas_sin_plazo_12m": sinplazo12,
+            "ventas_total_12m": total12,
+            "plazo_pond": plazo_pond,
+            "ciclos_anio": 365.0 / plazo_pond if plazo_pond > 0 else np.nan,
+            "exp_pico": exp_max,
+            "exp_p95": exp_p95,
+            "exp_al_corte": exp_hoy,
+            "nec_media": nec_media,
+            "base": base,
+            "meses_relacion": meses_rel,
+            "campanias": campanias,
+            "gamma": gamma,
+            "limite_calc": limite,
+            "dias_con_saldo": dias_con_saldo,
+            "alertas": "; ".join(alertas),
+        })
+
+    return pd.DataFrame(filas)
+
+
+def aplicar_topes(res, cap_pct, capacidad):
+    """Concentracion por cliente y, si se informa, techo global de financiacion."""
+    res = res.copy()
+    res["limite_sugerido"] = res["limite_calc"].map(escalonar)
+    res["tope_aplicado"] = ""
+
+    avisos = []
+    if cap_pct and cap_pct > 0:
+        # Un tope del x% es matematicamente imposible si x% * n_clientes < 1:
+        # aplicarlo igual aplastaria a toda la cartera al mismo numero.
+        if cap_pct * len(res) < 1:
+            avisos.append(
+                f"tope de concentracion {cap_pct:.0%} ignorado: con {len(res)} clientes "
+                f"el minimo viable es {1/len(res):.0%}")
+        else:
+            total = res["limite_sugerido"].sum()
+            tope = total * cap_pct
+            excede = res["limite_sugerido"] > tope
+            res.loc[excede, "tope_aplicado"] = f"concentracion {cap_pct:.0%}"
+            res.loc[excede, "limite_sugerido"] = escalonar(tope)
+
+    if capacidad and capacidad > 0:
+        total = res["limite_sugerido"].sum()
+        if total > capacidad:
+            factor = capacidad / total
+            res["limite_sugerido"] = (res["limite_sugerido"] * factor).map(escalonar)
+            res["tope_aplicado"] = res["tope_aplicado"].str.cat(
+                pd.Series([f"prorrateo x{factor:.2f}"] * len(res), index=res.index),
+                sep="; ").str.strip("; ")
+
+    total = res["limite_sugerido"].sum()
+    res["pct_cartera"] = res["limite_sugerido"] / total if total else 0.0
+    res["ventas_soportadas"] = np.where(
+        res["plazo_pond"] > 0,
+        res["limite_sugerido"] * 365.0 / res["plazo_pond"].replace(0, np.nan),
+        np.nan)
+    return res, avisos
+
+
+# ---------------------------------------------------------------------------
+# Salida
+# ---------------------------------------------------------------------------
+
+COLS_SALIDA = [
+    ("nro", "Nro cliente"),
+    ("cliente", "Cliente"),
+    ("vendedor", "Vendedor"),
+    ("ventas_total_12m", "Ventas 12m USD"),
+    ("ventas_credito_12m", "  a credito"),
+    ("ventas_contado_12m", "  contado"),
+    ("ventas_sin_plazo_12m", "  sin plazo"),
+    ("plazo_pond", "Plazo pond. (dias)"),
+    ("ciclos_anio", "Ciclos/anio"),
+    ("exp_pico", "Exposicion pico USD"),
+    ("exp_p95", "Exposicion P95 USD"),
+    ("exp_al_corte", "Saldo al corte USD"),
+    ("nec_media", "Saldo medio (rotacion)"),
+    ("base", "Base de calculo"),
+    ("meses_relacion", "Antiguedad (meses)"),
+    ("gamma", "Factor antiguedad"),
+    ("limite_sugerido", "LIMITE SUGERIDO USD"),
+    ("ventas_soportadas", "Ventas anuales que soporta"),
+    ("pct_cartera", "% de la cartera"),
+    ("tope_aplicado", "Tope aplicado"),
+    ("alertas", "Alertas"),
+]
+
+
+def exportar(res, destino, meta):
+    salida = res[[c for c, _ in COLS_SALIDA]].rename(columns=dict(COLS_SALIDA))
+    with pd.ExcelWriter(destino, engine="openpyxl") as xl:
+        salida.to_excel(xl, sheet_name="Limites sugeridos", index=False)
+        pd.DataFrame(meta.items(), columns=["Parametro", "Valor"]).to_excel(
+            xl, sheet_name="Criterios", index=False)
+        ws = xl.sheets["Limites sugeridos"]
+        ws.freeze_panes = "C2"
+        for col in ws.columns:
+            largo = max(len(str(c.value or "")) for c in col)
+            ws.column_dimensions[col[0].column_letter].width = min(max(largo + 2, 10), 42)
+    return destino
+
+
+def siguiente_nombre_libre(base):
+    if not base.exists():
+        return base
+    i = 2
+    while True:
+        cand = base.with_name(f"{base.stem}_v{i}{base.suffix}")
+        if not cand.exists():
+            return cand
+        i += 1
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Propuesta de limite de credito por cliente.")
+    ap.add_argument("fuente", help="Excel de facturacion, dashboard de ventas HTML o historico JSON")
+    ap.add_argument("--corte", help="Fecha de corte AAAA-MM-DD (default: ultima factura)")
+    ap.add_argument("--ventana", type=int, default=24,
+                    help="Meses de historia para medir la exposicion (default 24)")
+    ap.add_argument("--base", choices=["p95", "max", "media"], default="p95",
+                    help="Que medida de exposicion usar como base (default p95)")
+    ap.add_argument("--crecimiento", type=float, default=1.10,
+                    help="Holgura para crecimiento, ej 1.10 = +10%% (default 1.10)")
+    ap.add_argument("--cap-concentracion", type=float, default=0.10,
+                    help="Tope por cliente como fraccion de la cartera (default 0.10; 0 = sin tope)")
+    ap.add_argument("--capacidad", type=float, default=0,
+                    help="Techo global de financiacion en USD (0 = sin techo)")
+    ap.add_argument("--min-ventas", type=float, default=0,
+                    help="Ignorar clientes con ventas 12m por debajo de este monto")
+    ap.add_argument("--salida", help="Ruta del Excel de salida")
+    args = ap.parse_args()
+
+    df, origen = cargar(args.fuente)
+    if df.empty:
+        raise SystemExit("ERROR: la fuente no tiene filas utilizables.")
+
+    corte = pd.Timestamp(args.corte) if args.corte else df["fecha"].max()
+
+    desconocidas = sorted({c for c in df["condicionpago"].unique() if parsear_dias(c) is None})
+
+    res = analizar(df, corte, args.ventana, args.base, args.crecimiento)
+    if args.min_ventas:
+        res = res[res["ventas_total_12m"] >= args.min_ventas]
+    res = res[res["limite_calc"] > 0].copy()
+    res, avisos = aplicar_topes(res, args.cap_concentracion, args.capacidad)
+    res = res.sort_values("limite_sugerido", ascending=False).reset_index(drop=True)
+
+    meta = {
+        "Fuente": Path(args.fuente).name,
+        "Tipo de fuente": origen,
+        "Fecha de corte": corte.strftime("%Y-%m-%d"),
+        "Ventana de exposicion (meses)": args.ventana,
+        "Base de calculo": args.base,
+        "Holgura de crecimiento": args.crecimiento,
+        "Tope de concentracion": args.cap_concentracion,
+        "Capacidad global USD": args.capacidad or "sin techo",
+        "Generado": datetime.now().strftime("%d/%m/%Y %H:%M"),
+    }
+
+    destino = Path(args.salida) if args.salida else siguiente_nombre_libre(
+        BASE_DIR / f"creditos_sugeridos_{Path(args.fuente).stem}.xlsx")
+    exportar(res, destino, meta)
+
+    # ---- Resumen por consola ----
+    print(f"\nFuente: {Path(args.fuente).name}  ({origen})")
+    print(f"Corte: {corte:%d/%m/%Y}   Ventana: {args.ventana} meses   Base: {args.base}")
+    print(f"Clientes con linea propuesta: {len(res)}")
+    print(f"Suma de limites: US$ {res['limite_sugerido'].sum():,.0f}")
+    print(f"Ventas 12m (total): US$ {res['ventas_total_12m'].sum():,.0f}")
+    for a in avisos:
+        print(f"AVISO: {a}")
+    if desconocidas:
+        print(f"\nCondiciones de pago SIN plazo numerico ({len(desconocidas)}): "
+              f"{', '.join(desconocidas[:12])}")
+        print("  -> esas ventas no generan linea automatica; se marcan como alerta.")
+
+    print("\nTop 20 por limite sugerido:")
+    cab = f"{'Nro':>8}  {'Cliente':<34} {'Vts 12m':>12} {'Plazo':>6} {'Pico':>12} {'LIMITE':>12}"
+    print(cab)
+    print("-" * len(cab))
+    for _, r in res.head(20).iterrows():
+        print(f"{(r['nro'] or '-'): >8}  {r['cliente'][:34]:<34} "
+              f"{r['ventas_total_12m']:>12,.0f} {r['plazo_pond']:>6.0f} "
+              f"{r['exp_pico']:>12,.0f} {r['limite_sugerido']:>12,.0f}")
+
+    print(f"\nExcel generado: {destino}")
+    print("Recordatorio: esta propuesta es SOLO comportamiento comercial. Antes de")
+    print("aprobar hay que contrastarla con balances, indices, antiguedad en el rubro,")
+    print("deuda tomada con terceros y garantias.")
+
+
+if __name__ == "__main__":
+    main()
