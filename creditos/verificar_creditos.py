@@ -5,7 +5,9 @@ from datetime import datetime
 from pathlib import Path
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from asignar_creditos import serie_exposicion, parsear_dias, escalonar
+import pandas as pd
+from asignar_creditos import (serie_exposicion, parsear_dias, escalonar,
+                               analizar, etiqueta_campania)
 
 def d(s): return datetime.strptime(s, "%Y-%m-%d")
 fallas = []
@@ -64,6 +66,37 @@ for cond, esp in [("CONTADO", 0), ("30-60 DIAS", 60), ("45-75-105", 105),
 print("\n9. Escalones de redondeo")
 for monto, esp in [(0, 0), (1_234, 1_500), (12_100, 13_000), (61_200, 65_000), (340_000, 340_000)]:
     chk(f"escalonar({monto:,})", escalonar(monto), esp)
+
+print("\n10. Arrastre: la factura de la campania anterior sigue ocupando cupo")
+# Campania abr-mar. Factura del 01/02/2025 a 180 dias -> vence 31/07/2025, o sea
+# que sigue abierta cuando arranca la campania 2025/26 el 01/04/2025.
+df = pd.DataFrame([
+    {"fecha": "2025-02-01", "comprobante": 1, "cliente": "X", "vendedor": "V",
+     "condicionpago": "180 DIAS", "importe": 1000},
+    {"fecha": "2025-05-01", "comprobante": 2, "cliente": "X", "vendedor": "V",
+     "condicionpago": "180 DIAS", "importe": 600},
+])
+df["fecha"] = pd.to_datetime(df["fecha"])
+res, warmup = analizar(df, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+                       "p95", 1.0, usar_gamma=False, mes_campania=4)
+r = res.iloc[0]
+chk("dias de arrastre", warmup, 59)
+chk("saldo al abrir la campania", r["exp_apertura"], 1000)
+chk("pico = arrastre + factura nueva", r["exp_pico"], 1600)
+chk("ventas DEL periodo (no incluye la de febrero)", r["ventas_total_p"], 600)
+
+print("\n11. Sin arrastre el pico se subestima (misma data, periodo completo)")
+res2, w2 = analizar(df, pd.Timestamp("2025-05-01"), pd.Timestamp("2026-03-31"),
+                    "p95", 1.0, usar_gamma=False, mes_campania=4)
+chk("pico con la de febrero ya arrastrada", res2.iloc[0]["exp_pico"], 1600)
+
+print("\n12. Etiqueta de campania (abr-mar): feb-2026 cae en la campania 2025")
+et = etiqueta_campania(pd.to_datetime(pd.Series(
+    ["2025-02-15", "2025-04-01", "2026-02-15", "2026-04-01"])), 4)
+for i, esp in enumerate([2024, 2025, 2025, 2026]):
+    ok = int(et.iloc[i]) == esp
+    print(f"  [{'OK ' if ok else 'MAL'}] {et.index[i]}: campania {int(et.iloc[i])} (esperado {esp})")
+    if not ok: fallas.append(f"campania[{i}]")
 
 print("\n" + ("TODO OK" if not fallas else f"FALLARON {len(fallas)}: {fallas}"))
 sys.exit(1 if fallas else 0)

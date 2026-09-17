@@ -93,35 +93,51 @@ línea no frene una campaña que crece 10 %.
 
 ## Trabajar por campaña
 
-En Argentina la campaña agrícola va del **1 de julio al 30 de junio**
-(`campaña 2025/26` = jul-2025 a jun-2026). Es el período correcto para medir
-crédito: el año calendario parte la gruesa al medio y deja la venta de sep-dic en
-un año y su cobranza (a 180 días, contra cosecha) en el siguiente.
+Philagro cierra campaña **1 de abril a 31 de marzo** (`campaña 2025/26` = abr-2025 a
+mar-2026), así que hay que pasar `--inicio-campania 4`. El default del script es 7
+(julio-junio, el año agrícola estándar de INDEC).
 
 ```bash
-python3 asignar_creditos.py VENTAS.xlsx --campania 2025/26
-python3 asignar_creditos.py VENTAS.xlsx --campania 2025/26 --inicio-campania 5   # may-abr
+python3 asignar_creditos.py VENTAS.xlsx --campania 2025/26 --inicio-campania 4
 ```
+
+La campaña es el período correcto para medir crédito: el año calendario parte la
+gruesa al medio y deja la venta de sep-dic en un año y su cobranza (a 180 días,
+contra cosecha) en el siguiente.
 
 El script imprime siempre la **facturación por mes calendario** y sugiere el corte
 según los datos: la campaña arranca el mes siguiente al de menor facturación.
 
-### Dos límites de analizar una sola campaña
+### El arrastre entre campañas
 
-1. **La antigüedad no se puede medir.** Con menos de 18 meses de datos no hay forma
-   de distinguir un cliente de cinco campañas de uno que entró este año, así que el
-   factor γ se **neutraliza en 1,00 para todos** (con aviso) en vez de castigar a
-   toda la cartera por una limitación del archivo. Los clientes cuya primera compra
-   aparece pasados los primeros 45 días quedan marcados en Alertas. Para aplicar el
-   castigo hace falta más historia, o las fechas de alta.
-2. **Los primeros meses subestiman la exposición.** Las facturas abiertas que vienen
-   de la campaña anterior no están en el archivo, así que el arranque del período
-   muestra menos saldo del real. El aviso indica cuántos días dura ese efecto (= el
-   plazo más largo de la cartera). Si importa, mandá dos campañas y analizá la
-   segunda.
+Se mide sobre la campaña elegida, pero **arrastrando las facturas anteriores**. La
+distinción importa: una factura de la campaña previa que sigue abierta el 1 de abril
+ocupa crédito y tiene que contar. Si se filtran los datos a la campaña y listo, el
+arranque muestra menos saldo del real — justo cuando la gruesa vendida a 180 días
+todavía no se cobró.
 
-La ventana de exposición nunca empieza antes del primer dato: rellenar con ceros
-días sin información deprimiría el percentil 95 de toda la cartera.
+Por eso la serie de exposición se arma con **todo** el historial del archivo y recién
+después se recorta al período que se informa:
+
+- `Ventas del período` → sólo lo facturado dentro de la campaña.
+- `Exposición pico / P95` → incluye lo que venía abierto de antes.
+- `Saldo al abrir el período` → cuánto arrastraba el cliente el primer día. Si es > 0
+  queda marcado en Alertas.
+
+El script informa **cuántos días de arrastre** tuvo disponibles. Si ese arrastre es
+menor al plazo más largo de la cartera, avisa cuántos días del arranque quedan
+subestimados igual. Con dos campañas cargadas y analizando la segunda, el arrastre es
+de 365 días y el problema desaparece.
+
+### Cuando hay una sola campaña
+
+La antigüedad **no se puede medir**: con menos de 18 meses no hay forma de distinguir
+un cliente de cinco campañas de uno que entró este año, así que γ se **neutraliza en
+1,00 para todos** (con aviso) en vez de castigar a toda la cartera por una limitación
+del archivo. Se fuerza con `--antiguedad on|off`.
+
+La cuenta de campañas usa el mes de inicio configurado, no el año calendario: con
+`--inicio-campania 4`, una compra de feb-2026 pertenece a la campaña 2025.
 
 ## Qué NO entra en el cálculo automático
 
@@ -137,7 +153,7 @@ días sin información deprimiría el percentil 95 de toda la cartera.
 `Nro cliente` · `Cliente` · `Vendedor` · `Ventas 12m USD` (abierto en a crédito /
 contado / sin plazo) · `Plazo pond. (días)` · `Ciclos/año` · `Exposición pico` ·
 `Exposición P95` · `Saldo al corte` · `Saldo medio (rotación)` · `Base de cálculo` ·
-`Antigüedad (meses)` · `Factor antigüedad` · **`LÍMITE SUGERIDO USD`** ·
+`Saldo al abrir el período` · `Antigüedad (meses)` · `Campañas` · `Factor antigüedad` · **`LÍMITE SUGERIDO USD`** ·
 `Ventas anuales que soporta` · `% de la cartera` · `Tope aplicado` · `Alertas`
 
 **`Ventas anuales que soporta`** = límite × ciclos/año. Es la lectura comercial del
@@ -150,7 +166,9 @@ excepción.
 - opera sólo contado: no requiere línea
 - cliente nuevo (< 12 meses de relación)
 - muy estacional: el pico triplica al saldo medio
-- neto negativo en 12m (NC > facturas): revisar
+- neto negativo en el período (NC > facturas): revisar
+- abrió el período con US$ X de la campaña anterior
+- compró en una sola campaña
 
 ## Sobre el "Nro de cliente"
 
@@ -165,9 +183,8 @@ exportar el reporte con esa columna incluida.
 | --- | --- | --- |
 | `--corte AAAA-MM-DD` | última factura | Fecha de corte del análisis. |
 | `--campania 2025/26` | — | Analiza una campaña en vez de toda la historia. |
-| `--inicio-campania MM` | 7 (julio) | Mes en que arranca la campaña. |
+| `--inicio-campania MM` | 7 (julio) | Mes en que arranca la campaña. **Philagro: 4.** |
 | `--antiguedad auto\|on\|off` | auto | Factor γ. `auto` = sólo si hay ≥ 18 meses de datos. |
-| `--ventana N` | 24 | Meses de historia para medir exposición (2 campañas). |
 | `--base p95\|max\|media` | p95 | Qué medida usar como base. |
 | `--crecimiento F` | 1.10 | Holgura para crecimiento. |
 | `--cap-concentracion F` | 0.10 | Tope por cliente sobre la cartera. 0 = sin tope. |
