@@ -35,6 +35,9 @@ REQUIRED_COLS = [
 
 NO_NUMERICO_CONTADO = {"CONTADO"}
 
+MESES_ABBR = ["ene.", "feb.", "mar.", "abr.", "may.", "jun.",
+              "jul.", "ago.", "sep.", "oct.", "nov.", "dic."]
+
 # Escalones comerciales de redondeo del limite (USD).
 ESCALONES = [(5_000, 500), (50_000, 1_000), (200_000, 5_000), (float("inf"), 10_000)]
 
@@ -204,6 +207,26 @@ def factor_antiguedad(meses, campanias):
     return 0.60
 
 
+def rango_campania(etiqueta, mes_inicio):
+    """'2025/26' (o '2025') -> (1-jul-2025, 30-jun-2026) con mes_inicio=7."""
+    m = re.match(r"^\s*(\d{4})\s*(?:[/-]\s*(\d{2,4}))?\s*$", str(etiqueta))
+    if not m:
+        raise SystemExit("ERROR: --campania va como 2025/26 o 2025")
+    anio = int(m.group(1))
+    ini = pd.Timestamp(year=anio, month=mes_inicio, day=1)
+    fin = ini + pd.DateOffset(years=1) - pd.Timedelta(days=1)
+    return ini, fin
+
+
+def detectar_campania(df, mes_inicio):
+    """Mes de menor facturacion: el corte natural de campania segun los datos."""
+    por_mes = df.assign(m=df["fecha"].dt.month).groupby("m")["importe"].sum()
+    por_mes = por_mes.reindex(range(1, 13), fill_value=0.0)
+    valle = int(por_mes.idxmin())
+    sugerido = valle % 12 + 1          # la campania arranca despues del valle
+    return por_mes, valle, sugerido
+
+
 def separar_codigo(nombre):
     """Si el nombre del cliente trae el numero de cuenta adelante, lo separa."""
     m = re.match(r"^\s*(\d{3,})\s*[-–]\s*(.+)$", nombre)
@@ -221,12 +244,19 @@ def norm_texto(s):
 # Analisis por cliente
 # ---------------------------------------------------------------------------
 
-def analizar(df, corte, meses_ventana, base_modo, crecimiento):
+def analizar(df, corte, meses_ventana, base_modo, crecimiento,
+             usar_gamma=True, desde=None):
     df = df.copy()
     df["dias"] = df["condicionpago"].map(parsear_dias)
 
+    # La ventana nunca puede empezar antes del primer dato: rellenar con ceros
+    # dias sin informacion deprimiria el percentil 95 de toda la cartera.
     ini_ventana = corte - pd.DateOffset(months=meses_ventana)
-    ini_12m = corte - pd.DateOffset(months=12)
+    primer_dato = df["fecha"].min()
+    if desde is not None:
+        ini_ventana = max(ini_ventana, pd.Timestamp(desde))
+    ini_ventana = max(ini_ventana, primer_dato - pd.Timedelta(days=1))
+    ini_12m = max(corte - pd.DateOffset(months=12), primer_dato - pd.Timedelta(days=1))
 
     filas = []
     for cliente, g in df.groupby("cliente", sort=False):
@@ -273,7 +303,7 @@ def analizar(df, corte, meses_ventana, base_modo, crecimiento):
         primera = g["fecha"].min()
         meses_rel = (corte.year - primera.year) * 12 + (corte.month - primera.month)
         campanias = g["fecha"].dt.year.nunique()
-        gamma = factor_antiguedad(meses_rel, campanias)
+        gamma = factor_antiguedad(meses_rel, campanias) if usar_gamma else 1.00
 
         limite = base * gamma * crecimiento
         codigo, nombre = separar_codigo(cliente)
@@ -283,8 +313,11 @@ def analizar(df, corte, meses_ventana, base_modo, crecimiento):
             alertas.append("ventas sin plazo definido (canje/granos/plataforma): decidir aparte")
         if plazo_pond == 0 and credito12 == 0 and total12 != 0:
             alertas.append("opera solo contado: no requiere linea")
-        if meses_rel < 12:
+        if usar_gamma and meses_rel < 12:
             alertas.append(f"cliente nuevo ({meses_rel} meses de relacion)")
+        elif not usar_gamma and primera > ini_ventana + pd.Timedelta(days=45):
+            alertas.append(f"primera compra del periodo recien en {primera:%m/%Y}: "
+                           "sin historia previa en el archivo")
         if exp_max > 0 and nec_media > 0 and exp_max / nec_media > 3:
             alertas.append("muy estacional: el pico triplica al saldo medio")
         if total12 < 0:
@@ -416,6 +449,11 @@ def main():
     ap.add_argument("--corte", help="Fecha de corte AAAA-MM-DD (default: ultima factura)")
     ap.add_argument("--ventana", type=int, default=24,
                     help="Meses de historia para medir la exposicion (default 24)")
+    ap.add_argument("--campania", help="Analizar una campania: 2025/26 (o 2025)")
+    ap.add_argument("--inicio-campania", type=int, default=7, metavar="MM",
+                    help="Mes en que arranca la campania (default 7 = julio)")
+    ap.add_argument("--antiguedad", choices=["auto", "on", "off"], default="auto",
+                    help="Factor de antiguedad. auto = solo si hay >=18 meses de datos")
     ap.add_argument("--base", choices=["p95", "max", "media"], default="p95",
                     help="Que medida de exposicion usar como base (default p95)")
     ap.add_argument("--crecimiento", type=float, default=1.10,
@@ -433,11 +471,33 @@ def main():
     if df.empty:
         raise SystemExit("ERROR: la fuente no tiene filas utilizables.")
 
+    por_mes, valle, mes_sugerido = detectar_campania(df, args.inicio_campania)
+
+    desde = None
+    periodo = "historia completa"
+    if args.campania:
+        desde, fin = rango_campania(args.campania, args.inicio_campania)
+        df = df[(df["fecha"] >= desde) & (df["fecha"] <= fin)]
+        if df.empty:
+            raise SystemExit(f"ERROR: no hay ventas entre {desde:%d/%m/%Y} y {fin:%d/%m/%Y}")
+        periodo = f"campania {args.campania} ({desde:%m/%Y} a {fin:%m/%Y})"
+
     corte = pd.Timestamp(args.corte) if args.corte else df["fecha"].max()
+    primer_dato = df["fecha"].min()
+    span_meses = (corte.year - primer_dato.year) * 12 + (corte.month - primer_dato.month)
+
+    if args.antiguedad == "on":
+        usar_gamma = True
+    elif args.antiguedad == "off":
+        usar_gamma = False
+    else:
+        usar_gamma = span_meses >= 18
 
     desconocidas = sorted({c for c in df["condicionpago"].unique() if parsear_dias(c) is None})
+    plazo_max = max([d for d in df["condicionpago"].map(parsear_dias) if d] or [0])
 
-    res = analizar(df, corte, args.ventana, args.base, args.crecimiento)
+    res = analizar(df, corte, args.ventana, args.base, args.crecimiento,
+                   usar_gamma=usar_gamma, desde=desde)
     if args.min_ventas:
         res = res[res["ventas_total_12m"] >= args.min_ventas]
     res = res[res["limite_calc"] > 0].copy()
@@ -447,7 +507,10 @@ def main():
     meta = {
         "Fuente": Path(args.fuente).name,
         "Tipo de fuente": origen,
+        "Periodo analizado": periodo,
         "Fecha de corte": corte.strftime("%Y-%m-%d"),
+        "Historia disponible (meses)": span_meses,
+        "Factor de antiguedad": "aplicado" if usar_gamma else "neutralizado (historia corta)",
         "Ventana de exposicion (meses)": args.ventana,
         "Base de calculo": args.base,
         "Holgura de crecimiento": args.crecimiento,
@@ -462,12 +525,32 @@ def main():
 
     # ---- Resumen por consola ----
     print(f"\nFuente: {Path(args.fuente).name}  ({origen})")
-    print(f"Corte: {corte:%d/%m/%Y}   Ventana: {args.ventana} meses   Base: {args.base}")
+    print(f"Periodo: {periodo}")
+    print(f"Datos: {primer_dato:%d/%m/%Y} a {corte:%d/%m/%Y}  ({span_meses} meses)   Base: {args.base}")
     print(f"Clientes con linea propuesta: {len(res)}")
     print(f"Suma de limites: US$ {res['limite_sugerido'].sum():,.0f}")
     print(f"Ventas 12m (total): US$ {res['ventas_total_12m'].sum():,.0f}")
+    if not usar_gamma:
+        avisos.append(
+            f"con {span_meses} meses de datos NO se puede medir antiguedad: el factor "
+            "quedo neutro (1,00) para todos. Con mas anios, o con las fechas de alta, "
+            "se castiga al cliente nuevo")
+    if plazo_max and span_meses <= 14:
+        avisos.append(
+            f"los primeros ~{plazo_max} dias del periodo subestiman la exposicion: las "
+            "facturas abiertas que vienen de la campania anterior no estan en el archivo")
     for a in avisos:
         print(f"AVISO: {a}")
+
+    print("\nFacturacion por mes calendario (para ubicar el corte de campania):")
+    tot = por_mes.sum()
+    for m in range(1, 13):
+        v = por_mes[m]
+        barra = "#" * int(round(40 * v / por_mes.max())) if por_mes.max() else ""
+        marca = "  <- mes mas flojo" if m == valle else ""
+        print(f"  {MESES_ABBR[m-1]:<5} {v:>12,.0f}  {barra}{marca}")
+    print(f"  Corte de campania sugerido por los datos: arranca en "
+          f"{MESES_ABBR[mes_sugerido-1]} (usando --inicio-campania {mes_sugerido})")
     if desconocidas:
         print(f"\nCondiciones de pago SIN plazo numerico ({len(desconocidas)}): "
               f"{', '.join(desconocidas[:12])}")

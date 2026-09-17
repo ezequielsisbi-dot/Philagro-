@@ -91,6 +91,38 @@ línea no frene una campaña que crece 10 %.
 - `--capacidad <USD>`: techo global de financiación de Philagro. Si la suma de
   líneas lo supera, se prorratea todo proporcionalmente.
 
+## Trabajar por campaña
+
+En Argentina la campaña agrícola va del **1 de julio al 30 de junio**
+(`campaña 2025/26` = jul-2025 a jun-2026). Es el período correcto para medir
+crédito: el año calendario parte la gruesa al medio y deja la venta de sep-dic en
+un año y su cobranza (a 180 días, contra cosecha) en el siguiente.
+
+```bash
+python3 asignar_creditos.py VENTAS.xlsx --campania 2025/26
+python3 asignar_creditos.py VENTAS.xlsx --campania 2025/26 --inicio-campania 5   # may-abr
+```
+
+El script imprime siempre la **facturación por mes calendario** y sugiere el corte
+según los datos: la campaña arranca el mes siguiente al de menor facturación.
+
+### Dos límites de analizar una sola campaña
+
+1. **La antigüedad no se puede medir.** Con menos de 18 meses de datos no hay forma
+   de distinguir un cliente de cinco campañas de uno que entró este año, así que el
+   factor γ se **neutraliza en 1,00 para todos** (con aviso) en vez de castigar a
+   toda la cartera por una limitación del archivo. Los clientes cuya primera compra
+   aparece pasados los primeros 45 días quedan marcados en Alertas. Para aplicar el
+   castigo hace falta más historia, o las fechas de alta.
+2. **Los primeros meses subestiman la exposición.** Las facturas abiertas que vienen
+   de la campaña anterior no están en el archivo, así que el arranque del período
+   muestra menos saldo del real. El aviso indica cuántos días dura ese efecto (= el
+   plazo más largo de la cartera). Si importa, mandá dos campañas y analizá la
+   segunda.
+
+La ventana de exposición nunca empieza antes del primer dato: rellenar con ceros
+días sin información deprimiría el percentil 95 de toda la cartera.
+
 ## Qué NO entra en el cálculo automático
 
 - **CONTADO** (plazo 0): no ocupa crédito, no genera línea.
@@ -132,6 +164,9 @@ exportar el reporte con esa columna incluida.
 | Flag | Default | Qué hace |
 | --- | --- | --- |
 | `--corte AAAA-MM-DD` | última factura | Fecha de corte del análisis. |
+| `--campania 2025/26` | — | Analiza una campaña en vez de toda la historia. |
+| `--inicio-campania MM` | 7 (julio) | Mes en que arranca la campaña. |
+| `--antiguedad auto\|on\|off` | auto | Factor γ. `auto` = sólo si hay ≥ 18 meses de datos. |
 | `--ventana N` | 24 | Meses de historia para medir exposición (2 campañas). |
 | `--base p95\|max\|media` | p95 | Qué medida usar como base. |
 | `--crecimiento F` | 1.10 | Holgura para crecimiento. |
