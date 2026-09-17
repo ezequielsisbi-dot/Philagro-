@@ -7,7 +7,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pandas as pd
 from asignar_creditos import (serie_exposicion, parsear_dias, escalonar,
-                               analizar, etiqueta_campania)
+                               analizar, etiqueta_campania, parsear_cuotas)
 
 def d(s): return datetime.strptime(s, "%Y-%m-%d")
 fallas = []
@@ -77,18 +77,34 @@ df = pd.DataFrame([
      "condicionpago": "180 DIAS", "importe": 600},
 ])
 df["fecha"] = pd.to_datetime(df["fecha"])
-res, warmup = analizar(df, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+res, warmup, _ = analizar(df, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
                        "p95", 1.0, usar_gamma=False, mes_campania=4)
 r = res.iloc[0]
 chk("dias de arrastre", warmup, 59)
 chk("saldo al abrir la campania", r["exp_apertura"], 1000)
-chk("pico = arrastre + factura nueva", r["exp_pico"], 1600)
+chk("pico CON arrastre (riesgo real corrido)", r["exp_pico_total"], 1600)
+chk("pico de la campania actual (sin arrastre)", r["exp_pico"], 600)
 chk("ventas DEL periodo (no incluye la de febrero)", r["ventas_total_p"], 600)
 
-print("\n11. Sin arrastre el pico se subestima (misma data, periodo completo)")
-res2, w2 = analizar(df, pd.Timestamp("2025-05-01"), pd.Timestamp("2026-03-31"),
-                    "p95", 1.0, usar_gamma=False, mes_campania=4)
-chk("pico con la de febrero ya arrastrada", res2.iloc[0]["exp_pico"], 1600)
+print("\n11. El limite NO lo fija el arrastre: un cliente que se retira")
+# Compro fuerte antes del periodo y casi nada dentro: el pico historico es alto,
+# pero la linea tiene que seguir a la actividad actual.
+df2 = pd.DataFrame([
+    {"fecha": "2025-02-01", "comprobante": 1, "cliente": "Y", "vendedor": "V",
+     "condicionpago": "270 DIAS", "importe": 500000},
+    {"fecha": "2025-09-01", "comprobante": 2, "cliente": "Y", "vendedor": "V",
+     "condicionpago": "270 DIAS", "importe": 40000},
+])
+df2["fecha"] = pd.to_datetime(df2["fecha"])
+res2, _, _s2 = analizar(df2, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+                   "max", 1.0, usar_gamma=False, mes_campania=4)
+r2 = res2.iloc[0]
+chk("riesgo real corrido", r2["exp_pico_total"], 540000)
+chk("base del limite = solo la campania actual", r2["exp_pico"], 40000)
+chk("el limite sigue a la actividad, no al arrastre", r2["limite_calc"], 40000)
+ok = "viene bajando" in r2["alertas"]
+print(f"  [{'OK ' if ok else 'MAL'}] avisa que viene bajando: {r2['alertas'][:70]}")
+if not ok: fallas.append("alerta viene bajando")
 
 print("\n12. Etiqueta de campania (abr-mar): feb-2026 cae en la campania 2025")
 et = etiqueta_campania(pd.to_datetime(pd.Series(
@@ -97,6 +113,30 @@ for i, esp in enumerate([2024, 2025, 2025, 2026]):
     ok = int(et.iloc[i]) == esp
     print(f"  [{'OK ' if ok else 'MAL'}] {et.index[i]}: campania {int(et.iloc[i])} (esperado {esp})")
     if not ok: fallas.append(f"campania[{i}]")
+
+print("\n13. Cuotas: 30-60-90 ocupa menos cupo que 90 DIAS de una")
+df = pd.DataFrame([{"fecha": "2025-06-01", "comprobante": 1, "cliente": "X",
+                    "vendedor": "V", "condicionpago": "30 - 60 - 90 DIAS", "importe": 900}])
+df["fecha"] = pd.to_datetime(df["fecha"])
+res, _, _s = analizar(df, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+                  "max", 1.0, usar_gamma=False, mes_campania=4)
+chk("pico = las 3 cuotas juntas al inicio", res.iloc[0]["exp_pico"], 900)
+chk("plazo representativo = promedio (30+60+90)/3", res.iloc[0]["plazo_pond"], 60)
+s60 = serie_exposicion([(datetime(2025, 6, 1), 30, 300), (datetime(2025, 6, 1), 60, 300),
+                        (datetime(2025, 6, 1), 90, 300)], d("2025-06-01"), d("2025-12-31"))
+chk("a los 45 dias quedan 2 cuotas", s60[45], 600)
+chk("a los 75 dias queda 1 cuota", s60[75], 300)
+uno = serie_exposicion([(datetime(2025, 6, 1), 90, 900)], d("2025-06-01"), d("2025-12-31"))
+chk("a 90 dias de una, a los 75 sigue entero", uno[75], 900)
+
+print("\n14. parsear_cuotas")
+for cond, esp in [("CONTADO", [0]), ("60 DIAS", [60]), ("30 - 60 - 90 DIAS", [30, 60, 90]),
+                  ("45-75-105", [45, 75, 105]), ("180 DIAS PESIFICADO", [180]),
+                  ("CANJE/COMPENSACION", None), ("PLATAFORMA NERA", None)]:
+    obt = parsear_cuotas(cond)
+    ok = obt == esp
+    print(f"  [{'OK ' if ok else 'MAL'}] {cond:<22} -> {obt} (esperado {esp})")
+    if not ok: fallas.append(f"parsear_cuotas({cond})")
 
 print("\n" + ("TODO OK" if not fallas else f"FALLARON {len(fallas)}: {fallas}"))
 sys.exit(1 if fallas else 0)

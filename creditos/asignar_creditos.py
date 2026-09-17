@@ -62,6 +62,27 @@ def parsear_dias(condicion):
     return None
 
 
+def parsear_cuotas(condicion):
+    """Vencimientos de la condicion, en dias. "30 - 60 - 90 DIAS" -> [30, 60, 90].
+
+    Diferencia deliberada con el dashboard de ventas, que toma el MAXIMO: para
+    exposicion de credito el maximo sobreestima, porque a los 60 dias ya cobraste
+    un tercio. Cada cuota ocupa cupo por su propio plazo y se asume partes iguales,
+    que es la convencion de plaza.
+    """
+    if condicion is None:
+        return None
+    texto = str(condicion).strip().upper()
+    if not texto:
+        return None
+    numeros = [int(n) for n in re.findall(r"\d+", texto)]
+    if numeros:
+        return sorted(set(numeros))
+    if texto in NO_NUMERICO_CONTADO:
+        return [0]
+    return None
+
+
 def precio_unitario(row):
     tipo = str(row["Transacconsubtiponombre"]).strip() if pd.notna(row["Transacconsubtiponombre"]) else ""
     if tipo == "Nota Liquido producto":
@@ -260,7 +281,11 @@ def analizar(df, desde, corte, base_modo, crecimiento,
     que se informa. Sin eso, el arranque del periodo muestra menos saldo del real.
     """
     df = df.copy()
-    df["dias"] = df["condicionpago"].map(parsear_dias)
+    df["cuotas"] = df["condicionpago"].map(parsear_cuotas)
+    # Plazo representativo de la condicion = promedio de sus cuotas (una sola cuota
+    # devuelve ese mismo plazo). Es el que corresponde para medir credito.
+    df["dias"] = df["cuotas"].map(
+        lambda c: float(np.mean(c)) if isinstance(c, list) and c else None)
     df = df[df["fecha"] <= corte]
 
     primer_dato = df["fecha"].min()
@@ -268,9 +293,15 @@ def analizar(df, desde, corte, base_modo, crecimiento,
     # Dias de arrastre disponibles antes del periodo informado.
     warmup = max((desde - primer_dato).days, 0)
 
+    # Campania anterior: mismo largo, inmediatamente antes del periodo.
+    ini_previo = desde - (corte - desde) - pd.Timedelta(days=1)
+
     filas = []
+    series = {}
     for cliente, g in df.groupby("cliente", sort=False):
         gp = g[(g["fecha"] >= desde) & (g["fecha"] <= corte)]
+        gprev = g[(g["fecha"] >= ini_previo) & (g["fecha"] < desde)]
+        ventas_prev = gprev["importe"].sum()
 
         credito_p = gp.loc[gp["dias"].notna() & (gp["dias"] > 0), "importe"].sum()
         contado_p = gp.loc[gp["dias"] == 0, "importe"].sum()
@@ -288,19 +319,44 @@ def analizar(df, desde, corte, base_modo, crecimiento,
             plazo_pond = 0.0
 
         # Serie con TODAS las facturas del cliente; el recorte viene despues.
-        facturas = list(zip(g["fecha"].dt.to_pydatetime(), g["dias"], g["importe"]))
-        serie = serie_exposicion(facturas, primer_dato.to_pydatetime(), corte.to_pydatetime())
-        i_desde = (desde - primer_dato).days
-        serie_p = serie[max(i_desde, 0):]
-        if serie_p.size:
-            exp_max = float(serie_p.max())
-            exp_p95 = float(np.percentile(serie_p, 95))
-            exp_hoy = float(serie_p[-1])
-            exp_apertura = float(serie_p[0])
-            dias_con_saldo = int((serie_p > 0).sum())
+        # Cada factura se abre en sus cuotas: cada una ocupa cupo por su plazo.
+        facturas = []
+        for fecha, cuotas, importe in zip(g["fecha"].dt.to_pydatetime(),
+                                          g["cuotas"], g["importe"]):
+            if not isinstance(cuotas, list) or not cuotas:
+                continue
+            parte = importe / len(cuotas)
+            for d in cuotas:
+                facturas.append((fecha, d, parte))
+        # Dos series distintas, porque responden dos preguntas distintas:
+        #  - TOTAL   (arrastre + periodo): que riesgo se corrio de verdad.
+        #  - PROPIA  (solo lo facturado en el periodo): que exposicion genera la
+        #    actividad actual del cliente. Es la que fija el limite, porque el
+        #    limite mira para adelante. Un cliente que compro fuerte la campania
+        #    pasada y este ano casi no compro arrastra un pico alto que ya se esta
+        #    liquidando: darle linea por ese pico es financiar una retirada.
+        ini_py = primer_dato.to_pydatetime()
+        corte_py = corte.to_pydatetime()
+        i_desde = max((desde - primer_dato).days, 0)
+
+        serie_total = serie_exposicion(facturas, ini_py, corte_py)[i_desde:]
+        propias = [f for f in facturas if f[0] >= desde.to_pydatetime()]
+        serie_propia = serie_exposicion(propias, ini_py, corte_py)[i_desde:]
+
+        if serie_total.size:
+            exp_max_total = float(serie_total.max())
+            exp_hoy = float(serie_total[-1])
+            exp_apertura = float(serie_total[0])
+            dias_con_saldo = int((serie_total > 0).sum())
         else:
-            exp_max = exp_p95 = exp_hoy = exp_apertura = 0.0
+            exp_max_total = exp_hoy = exp_apertura = 0.0
             dias_con_saldo = 0
+
+        if serie_propia.size:
+            exp_max = float(serie_propia.max())
+            exp_p95 = float(np.percentile(serie_propia, 95))
+        else:
+            exp_max = exp_p95 = 0.0
 
         # Formula de rotacion: el saldo medio que sostiene ese volumen anual.
         dias_periodo = max((corte - desde).days, 1)
@@ -321,6 +377,10 @@ def analizar(df, desde, corte, base_modo, crecimiento,
 
         limite = base * gamma * crecimiento
         codigo, nombre = separar_codigo(cliente)
+        # Para medir friccion futura se usa la serie de la actividad propia: el
+        # limite se va a aplicar a la campania que viene, cuando el arrastre de la
+        # anterior ya se liquido. El arrastre se informa aparte (saldo al corte).
+        series[cliente] = serie_propia
 
         alertas = []
         if sinplazo_p > 0:
@@ -334,12 +394,22 @@ def analizar(df, desde, corte, base_modo, crecimiento,
                            "sin historia previa en el archivo")
         if usar_gamma and campanias < 2:
             alertas.append("compro en una sola campania")
+        if ventas_prev > 0 and total_p > 0 and total_p / ventas_prev < 0.5:
+            alertas.append(f"cayo {1 - total_p / ventas_prev:.0%} vs la campania anterior")
+        elif ventas_prev > 0 and total_p / ventas_prev > 2:
+            alertas.append(f"crecio {total_p / ventas_prev - 1:.0%} vs la campania anterior")
         if exp_max > 0 and nec_media > 0 and exp_max / nec_media > 3:
             alertas.append("muy estacional: el pico triplica al saldo medio")
         if total_p < 0:
             alertas.append("neto negativo en el periodo (NC > facturas): revisar")
         if warmup > 0 and exp_apertura > 0:
             alertas.append(f"abrio el periodo con US$ {exp_apertura:,.0f} de la campania anterior")
+        if exp_max > 0 and exp_max_total > exp_max * 1.5:
+            alertas.append(f"el riesgo real llego a US$ {exp_max_total:,.0f} por arrastre, "
+                           "muy por encima de lo que genera la campania actual: viene bajando")
+        elif exp_max_total > 0 and exp_max > exp_max_total * 1.5:
+            alertas.append("la campania actual genera mas exposicion que el pico historico: "
+                           "viene creciendo fuerte")
 
         filas.append({
             "nro": codigo,
@@ -350,10 +420,13 @@ def analizar(df, desde, corte, base_modo, crecimiento,
             "ventas_contado_p": contado_p,
             "ventas_sin_plazo_p": sinplazo_p,
             "ventas_total_p": total_p,
+            "ventas_previa": ventas_prev,
+            "var_campania": (total_p / ventas_prev - 1) if ventas_prev > 0 else np.nan,
             "plazo_pond": plazo_pond,
             "ciclos_anio": 365.0 / plazo_pond if plazo_pond > 0 else np.nan,
             "exp_pico": exp_max,
             "exp_p95": exp_p95,
+            "exp_pico_total": exp_max_total,
             "exp_apertura": exp_apertura,
             "exp_al_corte": exp_hoy,
             "nec_media": nec_media,
@@ -366,7 +439,7 @@ def analizar(df, desde, corte, base_modo, crecimiento,
             "alertas": "; ".join(alertas),
         })
 
-    return pd.DataFrame(filas), warmup
+    return pd.DataFrame(filas), warmup, series
 
 
 def aplicar_topes(res, cap_pct, capacidad):
@@ -420,9 +493,12 @@ COLS_SALIDA = [
     ("ventas_credito_p", "  a credito"),
     ("ventas_contado_p", "  contado"),
     ("ventas_sin_plazo_p", "  sin plazo"),
+    ("ventas_previa", "Ventas campania anterior"),
+    ("var_campania", "Var. vs campania anterior"),
     ("plazo_pond", "Plazo pond. (dias)"),
     ("ciclos_anio", "Ciclos/anio"),
-    ("exp_pico", "Exposicion pico USD"),
+    ("exp_pico", "Pico campania actual USD"),
+    ("exp_pico_total", "Pico con arrastre USD"),
     ("exp_p95", "Exposicion P95 USD"),
     ("exp_apertura", "Saldo al abrir el periodo"),
     ("exp_al_corte", "Saldo al corte USD"),
@@ -433,6 +509,7 @@ COLS_SALIDA = [
     ("gamma", "Factor antiguedad"),
     ("limite_sugerido", "LIMITE SUGERIDO USD"),
     ("ventas_soportadas", "Ventas anuales que soporta"),
+    ("dias_sobre_limite", "Dias/ano sobre el limite"),
     ("pct_cartera", "% de la cartera"),
     ("tope_aplicado", "Tope aplicado"),
     ("alertas", "Alertas"),
@@ -521,13 +598,34 @@ def main():
     desconocidas = sorted({c for c in df["condicionpago"].unique() if parsear_dias(c) is None})
     plazo_max = max([d for d in df["condicionpago"].map(parsear_dias) if d] or [0])
 
-    res, warmup = analizar(df, desde, corte, args.base, args.crecimiento,
-                           usar_gamma=usar_gamma, mes_campania=args.inicio_campania)
+    res, warmup, series = analizar(df, desde, corte, args.base, args.crecimiento,
+                                   usar_gamma=usar_gamma, mes_campania=args.inicio_campania)
     if args.min_ventas:
         res = res[res["ventas_total_p"] >= args.min_ventas]
     res = res[res["limite_calc"] > 0].copy()
     res, avisos = aplicar_topes(res, args.cap_concentracion, args.capacidad)
     res = res.sort_values("limite_sugerido", ascending=False).reset_index(drop=True)
+
+    # Cuantos dias del periodo el saldo real habria superado el limite propuesto.
+    # Es la medida operativa: cada uno de esos dias es un pedido de excepcion.
+    res["dias_sobre_limite"] = [
+        int((series[c] > lim).sum()) if c in series else 0
+        for c, lim in zip(res["cliente_raw"], res["limite_sugerido"])]
+
+    # Arranca la campania que viene ya pasado de linea por deuda de la anterior.
+    excedido = res["exp_al_corte"] > res["limite_sugerido"]
+    res.loc[excedido, "alertas"] = (
+        res.loc[excedido, "alertas"].str.cat(
+            "ARRANCA EXCEDIDO: al 31/03 debia US$ "
+            + res.loc[excedido, "exp_al_corte"].map(lambda v: f"{v:,.0f}")
+            + ", por encima del limite propuesto", sep="; ").str.strip("; "))
+
+    # El archivo puede no traer codigo de cliente. Se numera alfabeticamente para
+    # que el numero sea estable entre corridas y entre campanias.
+    sin_codigo = res["nro"].isna().all()
+    if sin_codigo:
+        orden = {n: i + 1 for i, n in enumerate(sorted(res["cliente_raw"]))}
+        res["nro"] = res["cliente_raw"].map(orden).map(lambda i: f"P{i:03d}")
 
     meta = {
         "Fuente": Path(args.fuente).name,
@@ -594,6 +692,10 @@ def main():
               f"{r['ventas_total_p']:>13,.0f} {r['plazo_pond']:>6.0f} "
               f"{r['exp_pico']:>12,.0f} {r['limite_sugerido']:>12,.0f}")
 
+    if sin_codigo:
+        print("\nAVISO: el archivo no trae codigo de cliente. Se numero alfabeticamente")
+        print("  (P001, P002, ...). Para el numero de cuenta real hay que exportar el")
+        print("  reporte con esa columna.")
     print(f"\nExcel generado: {destino}")
     print("Recordatorio: esta propuesta es SOLO comportamiento comercial. Antes de")
     print("aprobar hay que contrastarla con balances, indices, antiguedad en el rubro,")

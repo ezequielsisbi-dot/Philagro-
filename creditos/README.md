@@ -139,22 +139,56 @@ del archivo. Se fuerza con `--antiguedad on|off`.
 La cuenta de campañas usa el mes de inicio configurado, no el año calendario: con
 `--inicio-campania 4`, una compra de feb-2026 pertenece a la campaña 2025.
 
-## Qué NO entra en el cálculo automático
+## Condiciones en cuotas
 
-- **CONTADO** (plazo 0): no ocupa crédito, no genera línea.
-- **Condiciones sin plazo numérico** (CANJE, GRANOS, PLATAFORMA, TARJETA,
-  COMPENSACION…): son exposición real pero se cancelan de otra forma (grano a
-  cosecha, un tercero que asume el riesgo). No se les puede aplicar el modelo de
-  días, así que se informan aparte, en su propia columna, con alerta. **Se deciden a
-  mano.**
+`30 - 60 - 90 DIAS` significa tres pagos, no un pago a 90. Tomar el máximo —como
+hace el dashboard de ventas— **sobreestima la exposición**: a los 60 días ya cobraste
+dos tercios. Acá cada cuota ocupa cupo por su propio plazo, en partes iguales, que es
+la convención de plaza. El `plazo ponderado` que se informa es el promedio de las
+cuotas.
 
-## Columnas del Excel
+Es una divergencia **deliberada** con el criterio congelado de ventas, porque el
+propósito es otro: allá se informa el plazo más largo otorgado, acá se mide crédito
+ocupado.
+
+## Actividad propia vs. arrastre
+
+Se calculan dos series de exposición, porque responden preguntas distintas:
+
+| Serie | Qué incluye | Para qué |
+| --- | --- | --- |
+| **Con arrastre** | facturas previas todavía abiertas + las del período | Qué riesgo se corrió de verdad. Columna `Pico con arrastre`. |
+| **Actividad propia** | sólo lo facturado dentro del período | Qué exposición genera el cliente hoy. **Es la que fija el límite.** |
+
+El límite lo fija la actividad propia porque **mira para adelante**. Un cliente que
+compró fuerte la campaña pasada y este año casi no compró arrastra un pico alto que ya
+se está liquidando: darle línea por ese pico es financiar una retirada. Caso real de
+la cartera: un cliente con US$ 696.000 comprados a 270-360 días en 2024/25 y sólo
+US$ 70.000 en 2025/26 mostraba un pico con arrastre de US$ 608.000. Por actividad
+propia le corresponden US$ 65.000.
+
+Cuando las dos medidas divergen más de 50 %, se marca en Alertas (`viene bajando` /
+`viene creciendo fuerte`).
+
+## Días sobre el límite
+
+`Días/año sobre el límite` cuenta, sobre la **actividad propia**, cuántos días del
+período el saldo habría superado el límite propuesto. Cada uno de esos días es un
+pedido de excepción: es la medida operativa de cuánta fricción genera la línea.
+
+Se usa la actividad propia y no el saldo con arrastre porque el límite se aplica a la
+campaña siguiente, cuando el arrastre ya se liquidó. Para el arrastre está la alerta
+`ARRANCA EXCEDIDO`, que marca a los clientes cuyo saldo al cierre ya supera el límite
+propuesto.
+
+## Qué NO entra en el cálculo automático## Columnas del Excel
 
 `Nro cliente` · `Cliente` · `Vendedor` · `Ventas 12m USD` (abierto en a crédito /
 contado / sin plazo) · `Plazo pond. (días)` · `Ciclos/año` · `Exposición pico` ·
 `Exposición P95` · `Saldo al corte` · `Saldo medio (rotación)` · `Base de cálculo` ·
-`Saldo al abrir el período` · `Antigüedad (meses)` · `Campañas` · `Factor antigüedad` · **`LÍMITE SUGERIDO USD`** ·
-`Ventas anuales que soporta` · `% de la cartera` · `Tope aplicado` · `Alertas`
+`Saldo al abrir el período` · `Ventas campaña anterior` · `Var. vs campaña anterior` ·
+`Antigüedad (meses)` · `Campañas` · `Factor antigüedad` · **`LÍMITE SUGERIDO USD`** ·
+`Ventas anuales que soporta` · `Días/año sobre el límite` · `% de la cartera` · `Tope aplicado` · `Alertas`
 
 **`Ventas anuales que soporta`** = límite × ciclos/año. Es la lectura comercial del
 número: con esa línea, hasta cuánto puede comprar el cliente en el año sin pedir
@@ -169,6 +203,8 @@ excepción.
 - neto negativo en el período (NC > facturas): revisar
 - abrió el período con US$ X de la campaña anterior
 - compró en una sola campaña
+- cayó X% / creció X% vs la campaña anterior
+- ARRANCA EXCEDIDO: al cierre debía más que el límite propuesto
 
 ## Sobre el "Nro de cliente"
 
