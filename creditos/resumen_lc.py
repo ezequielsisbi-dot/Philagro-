@@ -166,6 +166,9 @@ PLANTILLA = """<!DOCTYPE html>
   tr:last-child td { border-bottom:none; }
   .cli { font-weight:600; min-width:200px; }
   .cli .nro { display:block; font-weight:400; font-size:11px; color:var(--suave); }
+  th.num { text-align:right; }
+  .vta { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;
+    color:var(--suave); }
   .lc { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;
     font-weight:600; font-size:15px; }
   .com { color:var(--suave); font-size:13px; line-height:1.55; }
@@ -186,7 +189,7 @@ PLANTILLA = """<!DOCTYPE html>
   <button class="chip" id="fCae" aria-pressed="false">Cayeron fuerte</button>
 </div>
 <div class="cont"><table>
-<thead><tr><th data-k="cliente">Cliente</th><th data-k="lc" style="text-align:right">LC asignado (US$)</th><th data-k="com">Comentarios</th></tr></thead>
+<thead><tr><th data-k="cliente">Cliente</th><th data-k="vprev" class="num">Ventas __ETIQ_PREV__</th><th data-k="vact" class="num">Ventas __ETIQ_ACT__</th><th data-k="lc" class="num">LC asignado (US$)</th><th data-k="com">Comentarios</th></tr></thead>
 <tbody id="tb"></tbody></table><div class="vacio" id="vacio" hidden>Sin resultados.</div></div>
 <div class="pie">__PIE__</div>
 </div>
@@ -218,6 +221,7 @@ function pintar() {
   vacio.hidden = r.length > 0;
   tb.innerHTML = r.map(d =>
     `<tr><td class="cli">${esc(d.cliente)}<span class="nro">${esc(d.nro)}</span></td>` +
+    `<td class="vta">${d.vprevf}</td><td class="vta">${d.vactf}</td>` +
     `<td class="lc">${d.lcf}</td><td class="com">${realza(d.com)}</td></tr>`).join('');
 }
 document.getElementById('q').addEventListener('input', pintar);
@@ -230,7 +234,7 @@ for (const id of ['fExc', 'fFric', 'fCae']) {
 }
 document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
   const k = th.dataset.k;
-  orden = {k, desc: orden.k === k ? !orden.desc : k === 'lc'};
+  orden = {k, desc: orden.k === k ? !orden.desc : k !== 'cliente' && k !== 'com'};
   pintar();
 }));
 pintar();
@@ -238,7 +242,7 @@ pintar();
 """
 
 
-def render_html(res, titulo, sub, kpis, pie):
+def render_html(res, titulo, sub, kpis, pie, col_prev, col_act, etiq_prev, etiq_act):
     datos = []
     for _, r in res.iterrows():
         alertas = str(r.get("Alertas") or "")
@@ -247,6 +251,8 @@ def render_html(res, titulo, sub, kpis, pie):
             "cliente": str(r["Cliente"]),
             "lc": float(r["LIMITE SUGERIDO USD"]),
             "lcf": fmt(r["LIMITE SUGERIDO USD"]),
+            "vprev": float(r[col_prev]), "vprevf": fmt(r[col_prev]),
+            "vact": float(r[col_act]), "vactf": fmt(r[col_act]),
             "com": r["_partes"],
             "dias": int(r.get("Dias/ano sobre el limite") or 0),
             "exc": "ARRANCA EXCEDIDO" in alertas,
@@ -260,6 +266,8 @@ def render_html(res, titulo, sub, kpis, pie):
             .replace("__SUB__", html_mod.escape(sub))
             .replace("__KPIS__", kpis_html)
             .replace("__PIE__", pie)
+            .replace("__ETIQ_PREV__", html_mod.escape(etiq_prev))
+            .replace("__ETIQ_ACT__", html_mod.escape(etiq_act))
             .replace("__DATOS__", json.dumps(datos, ensure_ascii=False)))
 
 
@@ -278,8 +286,16 @@ def main():
     det["Comentarios"] = det["_partes"].map(texto_plano)
     det = det.sort_values("LIMITE SUGERIDO USD", ascending=False).reset_index(drop=True)
 
+    # Los rotulos de campania los pone asignar_creditos.py segun el periodo
+    # analizado; aca se leen de la hoja Criterios para no hardcodearlos.
+    etiq_act = str(criterios.get("Campania analizada", "actual"))
+    etiq_prev = str(criterios.get("Campania de comparacion", "anterior"))
+    col_act, col_prev = f"Ventas {etiq_act} USD", f"Ventas {etiq_prev} USD"
+
     resumen = pd.DataFrame({
         "Cliente": det["Nro cliente"].fillna("").astype(str) + "  " + det["Cliente"],
+        f"Ventas {etiq_prev}": det[col_prev],
+        f"Ventas {etiq_act}": det[col_act],
         "LC asignado (US$)": det["LIMITE SUGERIDO USD"],
         "Comentarios": det["Comentarios"],
     })
@@ -291,16 +307,15 @@ def main():
         crit.to_excel(xl, sheet_name="Criterios", index=False)
         ws = xl.sheets["LC por cliente"]
         ws.freeze_panes = "A2"
-        ws.column_dimensions["A"].width = 46
-        ws.column_dimensions["B"].width = 18
-        ws.column_dimensions["C"].width = 120
-        for fila in ws.iter_rows(min_row=2, min_col=2, max_col=2):
+        for col, ancho in zip("ABCDE", (46, 16, 16, 18, 118)):
+            ws.column_dimensions[col].width = ancho
+        for fila in ws.iter_rows(min_row=2, min_col=2, max_col=4):
             for c in fila:
                 c.number_format = "#,##0"
         for fila in ws.iter_rows(min_row=1, max_row=1):
             for c in fila:
                 c.font = c.font.copy(bold=True)
-        for fila in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+        for fila in ws.iter_rows(min_row=2, min_col=5, max_col=5):
             for c in fila:
                 c.alignment = c.alignment.copy(wrap_text=True, vertical="top")
 
@@ -330,7 +345,8 @@ def main():
     destino_h = Path(args.salida_html or (BASE_DIR / "LC_resumen.html"))
     destino_h.write_text(
         render_html(det, titulo, html_mod.unescape(sub.replace("&middot;", "·")),
-                    kpis, pie), encoding="utf-8")
+                    kpis, pie, col_prev, col_act, etiq_prev, etiq_act),
+        encoding="utf-8")
 
     print(f"Excel: {destino_x}")
     print(f"HTML : {destino_h}")

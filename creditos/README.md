@@ -99,7 +99,18 @@ línea no frene una campaña que crece 10 %.
 **Límite = base × γ × holgura**, redondeado al escalón comercial de arriba
 (500 / 1.000 / 5.000 / 10.000 USD según el tamaño).
 
-**Paso 5 — Topes de cartera.**
+**Paso 5 — Piso: una factura.** El LC nunca queda por debajo de **una sola factura**
+del cliente, o no se le puede vender ni lo que ya se le vendió. Se mide por
+comprobante —las líneas del mismo comprobante suman y las notas de crédito netean— y
+sólo sobre las que ocupan cupo: una factura de contado no exige línea.
+
+El piso hace falta porque el P95 mide el saldo *habitual*: un cliente cuyo saldo típico
+es US$ 500 pero que una vez al año carga un pedido de US$ 147.000 salía con una línea
+de US$ 28.000. En la cartera real el piso corrigió **54 clientes** y subió el total un
+4,6 % (US$ 6.844.500 → US$ 7.160.000). Los que suben quedan marcados en Alertas: por su
+saldo habitual les correspondía menos, y conviene mirarlos.
+
+**Paso 6 — Topes de cartera.**
 
 - `--cap-concentracion 0.10` (default): ningún cliente por encima del 10 % de la
   cartera de crédito. Si `% × nº de clientes < 1` el tope es imposible de cumplir y
@@ -217,7 +228,7 @@ propuesto.
 
 ## Qué NO entra en el cálculo automático## Columnas del Excel
 
-`Nro cliente` · `Cliente` · `Vendedor` · `Ventas 12m USD` (abierto en a crédito /
+`Nro cliente` · `Cliente` · `Vendedor` · `Ventas del período USD` (abierto en a crédito /
 contado / sin plazo) · `Plazo pond. (días)` · `Ciclos/año` · `Exposición pico` ·
 `Exposición P95` · `Saldo al corte` · `Saldo medio (rotación)` · `Base de cálculo` ·
 `Saldo al abrir el período` · `Ventas campaña anterior` · `Var. vs campaña anterior` ·

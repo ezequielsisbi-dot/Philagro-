@@ -173,5 +173,47 @@ ok = r4["limite_calc"] >= 9240
 print(f"  [{'OK ' if ok else 'MAL'}] el limite cubre la factura: {r4['limite_calc']:,.0f} >= 9.240")
 if not ok: fallas.append("limite no cubre la factura")
 
+print("\n17. El LC nunca queda por debajo de una factura")
+# Saldo habitual de US$ 500 todo el ano y una sola factura de 40.000 a 7 dias:
+# como dura menos del 5% de los dias, el P95 no la ve y el limite saldria en
+# ~1.300. El piso tiene que levantarlo para que cubra la factura.
+filas = [{"fecha": f"{2025 + (m > 12):04d}-{((m - 1) % 12) + 1:02d}-01",
+          "comprobante": i, "cliente": "V", "vendedor": "V",
+          "condicionpago": "30 DIAS", "importe": 500}
+         for i, m in enumerate(range(4, 16))]
+filas.append({"fecha": "2025-10-01", "comprobante": 99, "cliente": "V", "vendedor": "V",
+              "condicionpago": "7 DIAS", "importe": 40000})
+df5 = pd.DataFrame(filas); df5["fecha"] = pd.to_datetime(df5["fecha"])
+r5 = analizar(df5, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+              "p95", 1.0, usar_gamma=False, mes_campania=4)[0].iloc[0]
+chk("factura mas grande", r5["factura_max"], 40000)
+ok = r5["base"] < 40000
+print(f"  [{'OK ' if ok else 'MAL'}] sin piso el limite saldria en {r5['base']:,.0f}, "
+      "por debajo de la factura")
+if not ok: fallas.append("el caso no ejercita el piso")
+ok = r5["limite_calc"] >= 40000
+print(f"  [{'OK ' if ok else 'MAL'}] el LC cubre la factura grande: {r5['limite_calc']:,.0f} >= 40.000")
+if not ok: fallas.append("piso por factura")
+chk("guarda el limite previo al piso", round(r5["limite_sin_piso"]), 1264)
+
+print("\n18. Una factura CONTADO grande no exige linea")
+df6 = pd.DataFrame([{"fecha": "2025-10-01", "comprobante": 1, "cliente": "U",
+                     "vendedor": "V", "condicionpago": "CONTADO", "importe": 80000},
+                    {"fecha": "2025-10-02", "comprobante": 2, "cliente": "U",
+                     "vendedor": "V", "condicionpago": "30 DIAS", "importe": 2000}])
+df6["fecha"] = pd.to_datetime(df6["fecha"])
+r6 = analizar(df6, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+              "p95", 1.0, usar_gamma=False, mes_campania=4)[0].iloc[0]
+chk("la factura contado no cuenta como piso", r6["factura_max"], 2000)
+chk("el LC sigue el credito, no el contado", r6["limite_calc"], 2000)
+
+print("\n19. Lineas del mismo comprobante suman para el piso")
+df7 = pd.DataFrame([{"fecha": "2025-10-01", "comprobante": 7, "cliente": "T", "vendedor": "V",
+                     "condicionpago": "30 DIAS", "importe": v} for v in (3000, 4000, 5000)])
+df7["fecha"] = pd.to_datetime(df7["fecha"])
+r7 = analizar(df7, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+              "p95", 1.0, usar_gamma=False, mes_campania=4)[0].iloc[0]
+chk("comprobante = suma de sus lineas", r7["factura_max"], 12000)
+
 print("\n" + ("TODO OK" if not fallas else f"FALLARON {len(fallas)}: {fallas}"))
 sys.exit(1 if fallas else 0)

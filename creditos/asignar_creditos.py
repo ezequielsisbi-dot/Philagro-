@@ -372,6 +372,18 @@ def analizar(df, desde, corte, base_modo, crecimiento,
         else:
             exp_max = exp_p95 = 0.0
 
+        # Piso operativo: el LC no puede quedar por debajo de UNA factura, o no se
+        # le puede vender ni lo que ya se le vendio. Se mide por comprobante (las
+        # lineas del mismo comprobante suman, y las notas de credito netean), solo
+        # sobre las que ocupan cupo: una factura contado no exige linea.
+        gcred = gp[gp["dias"].notna() & (gp["dias"] > 0)]
+        if len(gcred):
+            por_comp = gcred.groupby("comprobante")["importe"].sum()
+            factura_max = float(por_comp.max()) if len(por_comp) else 0.0
+            factura_max = max(factura_max, 0.0)
+        else:
+            factura_max = 0.0
+
         # Formula de rotacion: el saldo medio que sostiene ese volumen anual.
         dias_periodo = max((corte - desde).days, 1)
         credito_anualizado = credito_p * 365.0 / dias_periodo
@@ -389,7 +401,8 @@ def analizar(df, desde, corte, base_modo, crecimiento,
         campanias = int(etiqueta_campania(g["fecha"], mes_campania).nunique())
         gamma = factor_antiguedad(meses_rel, campanias) if usar_gamma else 1.00
 
-        limite = base * gamma * crecimiento
+        limite_sin_piso = base * gamma * crecimiento
+        limite = max(limite_sin_piso, factura_max)
         codigo, nombre = separar_codigo(cliente)
         # Para medir friccion futura se usa la serie de la actividad propia: el
         # limite se va a aplicar a la campania que viene, cuando el arrastre de la
@@ -448,6 +461,8 @@ def analizar(df, desde, corte, base_modo, crecimiento,
             "exp_al_corte": exp_hoy,
             "nec_media": nec_media,
             "base": base,
+            "factura_max": factura_max,
+            "limite_sin_piso": limite_sin_piso,
             "meses_relacion": meses_rel,
             "campanias": campanias,
             "gamma": gamma,
@@ -506,11 +521,9 @@ COLS_SALIDA = [
     ("nro", "Nro cliente"),
     ("cliente", "Cliente"),
     ("vendedor", "Vendedor"),
-    ("ventas_total_p", "Ventas del periodo USD"),
-    ("ventas_credito_p", "  a credito"),
-    ("ventas_contado_p", "  contado"),
-    ("ventas_sin_plazo_p", "  sin plazo"),
-    ("ventas_previa", "Ventas campania anterior"),
+    ("ventas_credito_p", "Ventas a credito USD"),
+    ("ventas_contado_p", "Ventas contado USD"),
+    ("ventas_sin_plazo_p", "Ventas canje/plataforma USD"),
     ("var_campania", "Var. vs campania anterior"),
     ("plazo_pond", "Plazo pond. (dias)"),
     ("ciclos_anio", "Ciclos/anio"),
@@ -521,9 +534,12 @@ COLS_SALIDA = [
     ("exp_al_corte", "Saldo al corte USD"),
     ("nec_media", "Saldo medio (rotacion)"),
     ("base", "Base de calculo"),
+    ("factura_max", "Factura mas grande USD"),
     ("meses_relacion", "Antiguedad (meses)"),
     ("campanias", "Campanias"),
     ("gamma", "Factor antiguedad"),
+    ("ventas_previa", "Ventas campania anterior"),
+    ("ventas_total_p", "Ventas campania actual"),
     ("limite_sugerido", "LIMITE SUGERIDO USD"),
     ("ventas_soportadas", "Ventas anuales que soporta"),
     ("dias_sobre_limite", "Dias/ano sobre el limite"),
@@ -535,8 +551,16 @@ COLS_SALIDA = [
 ]
 
 
-def exportar(res, destino, meta):
-    salida = res[[c for c, _ in COLS_SALIDA]].rename(columns=dict(COLS_SALIDA))
+def etiqueta_periodo(desde, corte):
+    """(1-abr-2025, 31-mar-2026) -> '2025/26'."""
+    if desde.year == corte.year:
+        return str(desde.year)
+    return f"{desde.year}/{str(corte.year)[-2:]}"
+
+
+def exportar(res, destino, meta, rotulos=None):
+    cols = [(c, rotulos.get(c, n) if rotulos else n) for c, n in COLS_SALIDA]
+    salida = res[[c for c, _ in cols]].rename(columns=dict(cols))
     with pd.ExcelWriter(destino, engine="openpyxl") as xl:
         salida.to_excel(xl, sheet_name="Limites sugeridos", index=False)
         pd.DataFrame(meta.items(), columns=["Parametro", "Valor"]).to_excel(
@@ -643,6 +667,12 @@ def main():
     res["exceso_max_pct"] = np.where(res["limite_sugerido"] > 0,
                                      res["exceso_max"] / res["limite_sugerido"], 0.0)
 
+    subio = res["limite_sugerido"] > res["limite_sin_piso"].map(escalonar)
+    res.loc[subio, "alertas"] = res.loc[subio, "alertas"].str.cat(
+        "LC elevado para cubrir su factura mas grande (US$ "
+        + res.loc[subio, "factura_max"].map(lambda v: f"{v:,.0f}")
+        + "); por su saldo habitual le correspondia menos", sep="; ").str.strip("; ")
+
     # Arranca la campania que viene ya pasado de linea por deuda de la anterior.
     excedido = res["exp_al_corte"] > res["limite_sugerido"]
     res.loc[excedido, "alertas"] = (
@@ -679,7 +709,15 @@ def main():
 
     destino = Path(args.salida) if args.salida else siguiente_nombre_libre(
         BASE_DIR / f"creditos_sugeridos_{Path(args.fuente).stem}.xlsx")
-    exportar(res, destino, meta)
+    etiq_actual = etiqueta_periodo(desde, corte)
+    etiq_previa = etiqueta_periodo(desde - (corte - desde) - pd.Timedelta(days=1),
+                                   desde - pd.Timedelta(days=1))
+    rotulos = {"ventas_previa": f"Ventas {etiq_previa} USD",
+               "ventas_total_p": f"Ventas {etiq_actual} USD",
+               "var_campania": f"Var. {etiq_actual} vs {etiq_previa}"}
+    meta["Campania analizada"] = etiq_actual
+    meta["Campania de comparacion"] = etiq_previa
+    exportar(res, destino, meta, rotulos)
 
     # ---- Resumen por consola ----
     print(f"\nFuente: {Path(args.fuente).name}  ({origen})")
