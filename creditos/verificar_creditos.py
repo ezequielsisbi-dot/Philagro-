@@ -157,5 +157,21 @@ chk("CONTADO sigue sin ocupar cupo", c["ventas_contado_p"], 5000)
 chk("se sigue informando cuanto fue por canje", c["ventas_sin_plazo_p"], 10000)
 chk("plazo ponderado = 30 (el contado no pondera)", c["plazo_pond"], 30)
 
+print("\n16. El percentil se mide sobre los dias CON saldo")
+# Compra una sola vez al ano a 15 dias: tiene saldo 15 dias de 365. Sobre el
+# calendario el P95 caeria en un dia de saldo cero y el limite se iria a cero.
+df4 = pd.DataFrame([{"fecha": "2025-09-01", "comprobante": 1, "cliente": "W",
+                     "vendedor": "V", "condicionpago": "15 DIAS", "importe": 9240}])
+df4["fecha"] = pd.to_datetime(df4["fecha"])
+res4, _, _z = analizar(df4, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+                       "p95", 1.0, usar_gamma=False, mes_campania=4)
+r4 = res4.iloc[0]
+chk("pico", r4["exp_pico"], 9240)
+chk("P95 cubre la operacion que hace", r4["exp_p95"], 9240)
+chk("dias con saldo", r4["dias_con_saldo"], 15)
+ok = r4["limite_calc"] >= 9240
+print(f"  [{'OK ' if ok else 'MAL'}] el limite cubre la factura: {r4['limite_calc']:,.0f} >= 9.240")
+if not ok: fallas.append("limite no cubre la factura")
+
 print("\n" + ("TODO OK" if not fallas else f"FALLARON {len(fallas)}: {fallas}"))
 sys.exit(1 if fallas else 0)

@@ -359,9 +359,16 @@ def analizar(df, desde, corte, base_modo, crecimiento,
             exp_max_total = exp_hoy = exp_apertura = 0.0
             dias_con_saldo = 0
 
+        # El percentil se toma sobre los dias en que el cliente DEBE algo, no sobre
+        # el calendario. Un cliente que compra dos veces al ano a 15 dias tiene
+        # saldo 15 dias de 365: sobre el calendario el P95 cae en un dia de saldo
+        # cero y el limite se va a cero, cuando en realidad necesita cubrir la
+        # operacion que hace. Sobre los dias con saldo la pregunta es la correcta:
+        # cuando nos debe, cuanto nos debe.
+        con_saldo = serie_propia[serie_propia > 0]
         if serie_propia.size:
             exp_max = float(serie_propia.max())
-            exp_p95 = float(np.percentile(serie_propia, 95))
+            exp_p95 = float(np.percentile(con_saldo, 95)) if con_saldo.size else 0.0
         else:
             exp_max = exp_p95 = 0.0
 

@@ -67,6 +67,22 @@ La base es `máx(P95, saldo medio)`. Se usa el **P95 y no el pico** para que un 
 excepcional no fije el límite de todo el año; el pico queda en el Excel como
 referencia. Con `--base max` se usa el pico, con `--base media` sólo la rotación.
 
+### El percentil va sobre los días CON saldo
+
+No sobre el calendario. Es la diferencia entre *"¿cuánto debe un día cualquiera del
+año?"* y *"cuando nos debe, ¿cuánto nos debe?"*. Para sizear un límite, la pregunta
+correcta es la segunda.
+
+Sobre el calendario, un cliente que compra dos veces al año a 15 días tiene saldo 15
+días de 365: el percentil 95 cae en un día de saldo cero y el límite se va a cero. Caso
+real de la cartera: un cliente facturado por US$ 9.240 en una sola operación salía con
+una línea de US$ 500 — no se le puede vender ni lo que ya se le vendió. Sobre los días
+con saldo sale US$ 7.000.
+
+Para los clientes activos casi todo el año el cambio es marginal (en la cartera real,
+US$ 111.343 → US$ 113.176 en el mayor). Sólo corrige a los compradores esporádicos, que
+es donde el percentil sobre calendario no significaba nada.
+
 **Paso 3 — Factor de antigüedad (γ).** Un cliente sin historia no puede recibir la
 misma línea que uno de cinco campañas:
 
