@@ -186,11 +186,29 @@ propia le corresponden US$ 65.000.
 Cuando las dos medidas divergen más de 50 %, se marca en Alertas (`viene bajando` /
 `viene creciendo fuerte`).
 
-## Días sobre el límite
+## Días sobre el límite — y cuánto
 
-`Días/año sobre el límite` cuenta, sobre la **actividad propia**, cuántos días del
-período el saldo habría superado el límite propuesto. Cada uno de esos días es un
-pedido de excepción: es la medida operativa de cuánta fricción genera la línea.
+La fricción tiene **dos dimensiones**, y leer una sola engaña en las dos direcciones:
+
+- `Días/año sobre el límite`: cuántos días del período el saldo habría superado el
+  límite. **Con qué frecuencia** molesta.
+- `Exceso máximo USD` / `Exceso máximo %`: cuánto se pasa en el peor momento.
+  **Cuánto** molesta.
+
+Casos reales de la cartera que muestran por qué hacen falta las dos:
+
+| Cliente | LC | Días | Exceso máx. | Lectura |
+| --- | --- | --- | --- | --- |
+| TECNOCAMPO | 3.000 | 112 | US$ 16 (0,5 %) | Ruido del redondeo del propio LC. |
+| AGROSUR | 115.000 | 11 | US$ 240.113 (209 %) | Operación puntual enorme: hay que decidirla. |
+
+Sólo por días, TECNOCAMPO parece el problema grave y AGROSUR "tolerable". Es al revés.
+32 de los 131 clientes que se exceden algún día lo hacen por menos del 5 % — puro
+redondeo, porque el límite se redondea al escalón comercial y el pico queda unos pesos
+arriba.
+
+El comentario de `resumen_lc.py` clasifica combinando las dos: por debajo del 5 % lo
+llama ruido; por encima del 100 % lo marca como alerta aunque dure pocos días.
 
 Se usa la actividad propia y no el saldo con arrastre porque el límite se aplica a la
 campaña siguiente, cuando el arrastre ya se liquidó. Para el arrastre está la alerta
@@ -204,7 +222,8 @@ contado / sin plazo) · `Plazo pond. (días)` · `Ciclos/año` · `Exposición p
 `Exposición P95` · `Saldo al corte` · `Saldo medio (rotación)` · `Base de cálculo` ·
 `Saldo al abrir el período` · `Ventas campaña anterior` · `Var. vs campaña anterior` ·
 `Antigüedad (meses)` · `Campañas` · `Factor antigüedad` · **`LÍMITE SUGERIDO USD`** ·
-`Ventas anuales que soporta` · `Días/año sobre el límite` · `% de la cartera` · `Tope aplicado` · `Alertas`
+`Ventas anuales que soporta` · `Días/año sobre el límite` ·
+`Exceso máximo USD` · `Exceso máximo %` · `% de la cartera` · `Tope aplicado` · `Alertas`
 
 **`Ventas anuales que soporta`** = límite × ciclos/año. Es la lectura comercial del
 número: con esa línea, hasta cuánto puede comprar el cliente en el año sin pedir

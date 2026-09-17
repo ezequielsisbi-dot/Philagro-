@@ -527,6 +527,8 @@ COLS_SALIDA = [
     ("limite_sugerido", "LIMITE SUGERIDO USD"),
     ("ventas_soportadas", "Ventas anuales que soporta"),
     ("dias_sobre_limite", "Dias/ano sobre el limite"),
+    ("exceso_max", "Exceso maximo USD"),
+    ("exceso_max_pct", "Exceso maximo %"),
     ("pct_cartera", "% de la cartera"),
     ("tope_aplicado", "Tope aplicado"),
     ("alertas", "Alertas"),
@@ -629,9 +631,17 @@ def main():
 
     # Cuantos dias del periodo el saldo real habria superado el limite propuesto.
     # Es la medida operativa: cada uno de esos dias es un pedido de excepcion.
+    # Ademas de cuantos dias, CUANTO se pasa. Sin la magnitud, pasarse US$ 16 en
+    # una linea de 3.000 se lee igual que pasarse US$ 80.000: el redondeo del
+    # limite solo ya alcanza para generar cientos de dias de exceso trivial.
     res["dias_sobre_limite"] = [
         int((series[c] > lim).sum()) if c in series else 0
         for c, lim in zip(res["cliente_raw"], res["limite_sugerido"])]
+    res["exceso_max"] = [
+        float(max((series[c] - lim).max(), 0.0)) if c in series and series[c].size else 0.0
+        for c, lim in zip(res["cliente_raw"], res["limite_sugerido"])]
+    res["exceso_max_pct"] = np.where(res["limite_sugerido"] > 0,
+                                     res["exceso_max"] / res["limite_sugerido"], 0.0)
 
     # Arranca la campania que viene ya pasado de linea por deuda de la anterior.
     excedido = res["exp_al_corte"] > res["limite_sugerido"]

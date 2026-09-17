@@ -37,17 +37,39 @@ def construir_comentario(r):
     intento de cortar 'hasta el primer punto' parte el numero al medio."""
     partes = []
 
+    # La friccion tiene DOS dimensiones y hay que leer las dos. Solo por dias,
+    # pasarse US$ 16 en una linea de 3.000 durante 112 dias se lee como un problema
+    # grave; solo por magnitud, un pico de US$ 240.000 durante 11 dias se lee como
+    # "tolerable". Ninguna de las dos lecturas sola sirve.
     dias = int(r.get("Dias/ano sobre el limite") or 0)
+    exc = float(r.get("Exceso maximo USD") or 0)
+    exc_pct = float(r.get("Exceso maximo %") or 0)
+    frec = ("pocos dias" if dias <= 15 else
+            "varias veces al ano" if dias <= 45 else
+            "buena parte de la campania")
+
     if dias == 0:
         partes.append(("ok", "No quedaria excedido ningun dia de la campania."))
+    elif exc_pct <= 0.05:
+        # Pasarse un 5% es ruido del propio redondeo del limite, no falta de cupo.
+        partes.append(("ok", f"Quedaria excedido {dias} dias pero por un margen minimo "
+                             f"(maximo US$ {fmt(exc)}, {exc_pct:.1%}): alcanza con "
+                             "redondear el LC para arriba."))
+    elif exc_pct > 1.0:
+        partes.append(("alerta", f"Quedaria excedido {dias} dias ({frec}), con picos de "
+                                 f"hasta US$ {fmt(exc)}, {exc_pct:.0%} por encima del LC. "
+                                 "Son operaciones puntuales mucho mas grandes que lo "
+                                 "habitual: definir si van por excepcion o se sube la linea."))
+    elif exc_pct > 0.25:
+        partes.append(("aviso", f"Quedaria excedido {dias} dias ({frec}), hasta "
+                                f"US$ {fmt(exc)} ({exc_pct:.0%} sobre el LC)."))
     elif dias <= 15:
-        partes.append(("", f"Quedaria excedido {dias} dias de la campania (tolerable)."))
-    elif dias <= 45:
-        partes.append(("aviso", f"Quedaria excedido {dias} dias de la campania: "
-                                "va a pedir excepcion varias veces."))
+        partes.append(("", f"Quedaria excedido {dias} dias de la campania, hasta "
+                           f"US$ {fmt(exc)} ({exc_pct:.0%}): tolerable."))
     else:
-        partes.append(("aviso", f"Quedaria excedido {dias} dias de la campania: "
-                                "el limite le queda corto para como compra."))
+        partes.append(("aviso", f"Quedaria excedido {dias} dias ({frec}), hasta "
+                                f"US$ {fmt(exc)} ({exc_pct:.0%}): el limite le queda "
+                                "justo para como compra."))
 
     plazo = r.get("Plazo pond. (dias)")
     if pd.notna(plazo) and plazo > 0:
