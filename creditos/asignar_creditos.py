@@ -272,7 +272,7 @@ def etiqueta_campania(fechas, mes_inicio):
 
 
 def analizar(df, desde, corte, base_modo, crecimiento,
-             usar_gamma=True, mes_campania=7):
+             usar_gamma=True, mes_campania=7, plazo_otras=None):
     """Mide sobre [desde, corte], pero arrastra las facturas anteriores.
 
     La distincion importa: una factura de la campania previa que sigue abierta el
@@ -281,7 +281,14 @@ def analizar(df, desde, corte, base_modo, crecimiento,
     que se informa. Sin eso, el arranque del periodo muestra menos saldo del real.
     """
     df = df.copy()
-    df["cuotas"] = df["condicionpago"].map(parsear_cuotas)
+    # cuotas_orig conserva la lectura literal de la condicion, para poder seguir
+    # informando cuanto se vendio por canje / plataforma / tarjeta. cuotas es lo
+    # que usa el motor: si se fijo un plazo para esas condiciones, va ahi.
+    df["cuotas_orig"] = df["condicionpago"].map(parsear_cuotas)
+    df["cuotas"] = df["cuotas_orig"]
+    if plazo_otras is not None:
+        df["cuotas"] = [c if isinstance(c, list) else [plazo_otras]
+                        for c in df["cuotas_orig"]]
     # Plazo representativo de la condicion = promedio de sus cuotas (una sola cuota
     # devuelve ese mismo plazo). Es el que corresponde para medir credito.
     df["dias"] = df["cuotas"].map(
@@ -305,7 +312,7 @@ def analizar(df, desde, corte, base_modo, crecimiento,
 
         credito_p = gp.loc[gp["dias"].notna() & (gp["dias"] > 0), "importe"].sum()
         contado_p = gp.loc[gp["dias"] == 0, "importe"].sum()
-        sinplazo_p = gp.loc[gp["dias"].isna(), "importe"].sum()
+        sinplazo_p = gp.loc[gp["cuotas_orig"].isna(), "importe"].sum()
         total_p = gp["importe"].sum()
 
         # Plazo ponderado por USD, solo sobre ventas a credito con importe positivo
@@ -384,7 +391,10 @@ def analizar(df, desde, corte, base_modo, crecimiento,
 
         alertas = []
         if sinplazo_p > 0:
-            alertas.append("ventas sin plazo definido (canje/granos/plataforma): decidir aparte")
+            alertas.append(
+                f"US$ {sinplazo_p:,.0f} por canje/plataforma/tarjeta"
+                + (f", computados a {plazo_otras} dias" if plazo_otras is not None
+                   else ": sin plazo, decidir aparte"))
         if plazo_pond == 0 and credito_p == 0 and total_p != 0:
             alertas.append("opera solo contado: no requiere linea")
         if usar_gamma and meses_rel < 12:
@@ -548,6 +558,9 @@ def main():
     ap.add_argument("--campania", help="Analizar una campania: 2025/26 (o 2025)")
     ap.add_argument("--inicio-campania", type=int, default=7, metavar="MM",
                     help="Mes en que arranca la campania (default 7 = julio)")
+    ap.add_argument("--plazo-otras", type=int, metavar="N",
+                    help="Plazo en dias para condiciones sin numero (canje, plataforma, "
+                         "tarjeta). Sin esto quedan fuera del calculo")
     ap.add_argument("--antiguedad", choices=["auto", "on", "off"], default="auto",
                     help="Factor de antiguedad. auto = solo si hay >=18 meses de datos")
     ap.add_argument("--base", choices=["p95", "max", "media"], default="p95",
@@ -599,7 +612,8 @@ def main():
     plazo_max = max([d for d in df["condicionpago"].map(parsear_dias) if d] or [0])
 
     res, warmup, series = analizar(df, desde, corte, args.base, args.crecimiento,
-                                   usar_gamma=usar_gamma, mes_campania=args.inicio_campania)
+                                   usar_gamma=usar_gamma, mes_campania=args.inicio_campania,
+                                   plazo_otras=args.plazo_otras)
     if args.min_ventas:
         res = res[res["ventas_total_p"] >= args.min_ventas]
     res = res[res["limite_calc"] > 0].copy()
@@ -638,6 +652,9 @@ def main():
         "Plazo mas largo de la cartera (dias)": plazo_max,
         "Base de calculo": args.base,
         "Holgura de crecimiento": args.crecimiento,
+        "Plazo para canje/plataforma/tarjeta": (f"{args.plazo_otras} dias"
+                                                if args.plazo_otras is not None
+                                                else "excluidas"),
         "Tope de concentracion": args.cap_concentracion,
         "Capacidad global USD": args.capacidad or "sin techo",
         "Generado": datetime.now().strftime("%d/%m/%Y %H:%M"),
@@ -681,7 +698,10 @@ def main():
     if desconocidas:
         print(f"\nCondiciones de pago SIN plazo numerico ({len(desconocidas)}): "
               f"{', '.join(desconocidas[:12])}")
-        print("  -> esas ventas no generan linea automatica; se marcan como alerta.")
+        if args.plazo_otras is not None:
+            print(f"  -> computadas a {args.plazo_otras} dias.")
+        else:
+            print("  -> esas ventas no generan linea automatica; se marcan como alerta.")
 
     print("\nTop 20 por limite sugerido:")
     cab = f"{'Nro':>8}  {'Cliente':<34} {'Vts periodo':>13} {'Plazo':>6} {'Pico':>12} {'LIMITE':>12}"

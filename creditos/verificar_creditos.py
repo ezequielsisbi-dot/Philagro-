@@ -138,5 +138,24 @@ for cond, esp in [("CONTADO", [0]), ("60 DIAS", [60]), ("30 - 60 - 90 DIAS", [30
     print(f"  [{'OK ' if ok else 'MAL'}] {cond:<22} -> {obt} (esperado {esp})")
     if not ok: fallas.append(f"parsear_cuotas({cond})")
 
+print("\n15. --plazo-otras: canje/plataforma pasan a generar credito")
+df3 = pd.DataFrame([
+    {"fecha": "2025-06-01", "comprobante": 1, "cliente": "Z", "vendedor": "V",
+     "condicionpago": "CANJE/GRANOS", "importe": 10000},
+    {"fecha": "2025-06-01", "comprobante": 2, "cliente": "Z", "vendedor": "V",
+     "condicionpago": "CONTADO", "importe": 5000},
+])
+df3["fecha"] = pd.to_datetime(df3["fecha"])
+sin, _, _x = analizar(df3, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+                      "max", 1.0, usar_gamma=False, mes_campania=4)
+chk("sin --plazo-otras el canje no ocupa cupo", sin.iloc[0]["exp_pico"], 0)
+con, _, _y = analizar(df3, pd.Timestamp("2025-04-01"), pd.Timestamp("2026-03-31"),
+                      "max", 1.0, usar_gamma=False, mes_campania=4, plazo_otras=30)
+c = con.iloc[0]
+chk("con --plazo-otras 30 el canje ocupa cupo", c["exp_pico"], 10000)
+chk("CONTADO sigue sin ocupar cupo", c["ventas_contado_p"], 5000)
+chk("se sigue informando cuanto fue por canje", c["ventas_sin_plazo_p"], 10000)
+chk("plazo ponderado = 30 (el contado no pondera)", c["plazo_pond"], 30)
+
 print("\n" + ("TODO OK" if not fallas else f"FALLARON {len(fallas)}: {fallas}"))
 sys.exit(1 if fallas else 0)
