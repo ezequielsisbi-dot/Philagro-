@@ -20,6 +20,7 @@ Histórico incremental:
 """
 
 import json
+from collections import Counter
 import re
 import sys
 from datetime import datetime
@@ -145,20 +146,51 @@ def guardar_historico(filas: list):
         json.dump(filas, f, ensure_ascii=False, separators=(",", ":"))
 
 
+def _clave_contenido(fila: dict) -> tuple:
+    """Identidad de una fila que sobrevive a cambios de numeracion.
+
+    El historico sembrado desde un dashboard viejo no conserva el numero de
+    comprobante real (guarda un indice), asi que comparar por `comprobante`
+    entre historico y Excel nuevo no siempre es posible. El contenido si.
+    """
+    return (
+        fila["fecha"],
+        str(fila["cliente"]).strip().upper(),
+        str(fila["producto"]).strip().upper(),
+        round(float(fila["importe"]), 2),
+    )
+
+
 def fusionar(historico: list, nuevas: pd.DataFrame) -> list:
     """Reemplaza en el historico los meses que trae el Excel nuevo por su version
     (se asume mas completa), y agrega los meses que no existian. No toca los
-    meses que el Excel nuevo no menciona."""
+    meses que el Excel nuevo no menciona.
+
+    Verifica 0 filas perdidas POR CONTENIDO, no por cantidad: que un mes pase de
+    50 a 130 comprobantes no garantiza que los 50 viejos esten entre los 130. Las
+    filas del historico que el Excel nuevo no trae se CONSERVAN y se informan.
+    """
     meses_nuevos = set(nuevas["mes"].unique())
 
-    # Comprobantes distintos por mes ANTES de tocar nada (para verificar 0 perdidos).
     viejos_por_mes = {}
     for fila in historico:
         viejos_por_mes.setdefault(fila["mes"], set()).add(fila["comprobante"])
 
     conservados = [f for f in historico if f["mes"] not in meses_nuevos]
     nuevas_filas = nuevas.to_dict(orient="records")
-    fusionado = conservados + nuevas_filas
+
+    # Filas del historico, en los meses reemplazados, que el Excel nuevo no trae.
+    pisados = [f for f in historico if f["mes"] in meses_nuevos]
+    nuevas_por_clave = Counter(_clave_contenido(f) for f in nuevas_filas)
+    vistas = Counter()
+    rescatadas = []
+    for fila in pisados:
+        clave = _clave_contenido(fila)
+        vistas[clave] += 1
+        if vistas[clave] > nuevas_por_clave.get(clave, 0):
+            rescatadas.append(fila)
+
+    fusionado = conservados + nuevas_filas + rescatadas
 
     nuevos_por_mes = {}
     for fila in nuevas_filas:
@@ -171,13 +203,20 @@ def fusionar(historico: list, nuevas: pd.DataFrame) -> list:
         antes = len(viejos_por_mes.get(mes, set()))
         despues = len(nuevos_por_mes.get(mes, set()))
         if mes in viejos_por_mes:
-            estado = "OK" if despues >= antes else "ADVERTENCIA: BAJARON comprobantes"
-            print(f"  {mes}: reemplazado — comprobantes {antes} -> {despues}  [{estado}]")
-            if despues < antes:
-                print(f"    !! El Excel nuevo trae MENOS comprobantes que el histórico para {mes}. "
-                      f"Revisar antes de confiar en este dashboard para ese mes.")
+            print(f"  {mes}: reemplazado — comprobantes {antes} -> {despues}")
         else:
             print(f"  {mes}: mes nuevo — {despues} comprobantes agregados.")
+
+    if rescatadas:
+        print(f"\n  ATENCION: {len(rescatadas)} fila(s) del histórico que el Excel nuevo NO trae.")
+        print("  Se CONSERVAN (no se pierde nada). Revisar si fueron anuladas en el sistema:")
+        for fila in sorted(rescatadas, key=lambda f: (f["fecha"], str(f["cliente"]))):
+            print(f"    {fila['fecha']} | {str(fila['cliente'])[:26]:26} | "
+                  f"{str(fila['producto'])[:26]:26} | {fila['importe']:>10.2f} | "
+                  f"comp {fila['comprobante']}")
+    else:
+        print("  Verificación de pérdida: 0 filas del histórico quedaron fuera.")
+
     meses_conservados = sorted({f["mes"] for f in conservados})
     if meses_conservados:
         print(f"  Meses históricos sin tocar: {', '.join(meses_conservados)}")
