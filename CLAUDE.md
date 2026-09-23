@@ -196,3 +196,87 @@ borren. El usuario decidió seguir así. No volver a plantearlo salvo que él lo
 ```bash
 node verificar.mjs dashboard.html   # 0 errores + los cuadros cierran exacto
 ```
+
+---
+
+# Dashboard de Ventas — Philagro S.A. (`ventas/`)
+
+Proyecto **independiente** del de cobranzas: no comparte ni pisa sus archivos.
+Genera un dashboard HTML autocontenido (doble clic, sin internet) a partir de un
+Excel de **facturación**.
+
+## Flujo fijo
+
+```bash
+cd ventas
+python3 ventas_dashboard.py <FACTURACION.xlsx>     # fusiona y genera
+node verificar_ventas.mjs dashboard_ventas_*.html  # 0 errores + los cuadros cierran
+```
+
+Genera SIEMPRE un archivo nuevo `dashboard_ventas_<nombre-del-excel>.html`; si ya
+existe agrega `_v2`, `_v3`… **Nunca sobrescribe.** Se entrega por chat.
+
+## Dónde está la base — PENDIENTE
+
+El histórico de ventas **todavía no se versiona**: el repo es público y son 357
+clientes con sus importes. Hasta que el usuario lo pase a privado, en cada sesión
+nueva hay que **pedírselo**: el `historico_ventas.json.gz` o cualquier
+`dashboard_ventas_*.html` (los datos viajan embebidos y `sembrar_historico.py` los
+reconstruye).
+
+```bash
+python3 sembrar_historico.py <dashboard_ventas_VIEJO.html> --forzar
+```
+
+Cuando el repo pase a privado: borrar `ventas/historico/` y `ventas/datos/` del
+`.gitignore` y versionar el histórico y los Excel, como ya se hace en cobranzas.
+
+## Cómo fusionar sin perder ni duplicar
+
+- Se **reemplaza el mes completo** que trae el Excel nuevo por su versión (se asume
+  más completa) y se suman los meses que no existían. Los meses que el Excel no
+  menciona no se tocan.
+- La verificación de pérdida es **por CONTENIDO** (fecha + cliente + producto +
+  importe), no por cantidad de comprobantes: que un mes suba de 50 a 130 no
+  garantiza que los 50 viejos estén entre los 130 (pasó el 23/09/2026). Tampoco se
+  puede comparar por número de comprobante: el histórico sembrado desde un dashboard
+  viejo guarda un índice, no el número real (`A-00010-00018094`).
+- Las filas del histórico que el Excel nuevo no trae **se conservan y se listan**.
+  Si el usuario confirma que son basura, se sacan a mano (ver abajo).
+
+## Criterios congelados (no cambiar sin pedido explícito)
+
+1. **Moneda = USD** de `Importemonsecundaria`. Los importes ya vienen firmados: las
+   notas de crédito son negativas y se netean solas al sumar. No convertir nada.
+2. **Precio unitario por fila**: si `Transacconsubtiponombre == "Nota Liquido
+   producto"` → `Costo`; si `Costo == 0` (producto real) → `Precio`; resto →
+   `Precio`. Las filas "Asesoramiento-Comisiones" tienen `Costo` 0 intencional.
+3. **Plazo (días)** desde `Condicionpago`: CONTADO = 0; los rangos ("30-60 DIAS",
+   "45-75-105") toman el MÁXIMO; las no numéricas (CANJE, PLATAFORMA, TARJETA,
+   COMPENSACION, GRANOS) quedan al final del cuadro de plazos.
+4. **Cantidad de operaciones** = comprobantes distintos (columna `Comprobante`).
+5. **Precios por producto**: promedio PONDERADO por USD, Σ(precio × importe) /
+   Σ(importe), por mes.
+6. Importes **enteros**, negativos entre paréntesis. Cada tabla cierra sola.
+7. **Autocontenido**: Chart.js inline (de `node_modules`, `npm install`), datos como
+   JSON embebido. Nada de fetch/CDN.
+
+## Vistas
+
+KPIs (ventas en miles, comprobantes, clientes, vendedor principal) · cuadro dinámico
+"Ventas por [Vendedor/Producto/Cliente/Principio activo/Condición de pago] y mes"
+(condición de pago ordenada por días) · ventas por mes y año · cantidades por
+producto · precios ponderados · plazos por producto · y al final el gráfico
+"Comparativo por año" (barras agrupadas, eje X = mes, una serie por año).
+
+Filtros multi-selección con chips, buscador y "Marcar visibles": Año, Mes, Vendedor,
+Cliente, Producto, más Desde/Hasta. Combinan con AND; vacío = todos. Es histórico:
+los años se arman solos según las fechas de los datos.
+
+## Decisiones del usuario
+
+- **23/09/2026** — La fila `A-00010-00021252` (AGRONOMIA ALVAREZ SRL, "Gastos
+  Varios-IVA 0%", 805,70 USD, 2026-09-04) quedó **excluida** a pedido del usuario:
+  estaba en el histórico pero no en el export nuevo, y su numeración (21252) está
+  fuera del rango del resto (18xxx). Si reaparece en un export futuro, preguntar
+  antes de incorporarla.

@@ -29,3 +29,17 @@ node_modules/
 # nueva sin pedirle nada al usuario (pedido explicito, 23/09/2026).
 !historico/
 !historico/dashboard.html
+
+# ---------------------------------------------------------------------------
+# Proyecto de VENTAS (ventas/) — independiente del de cobranzas.
+# Las salidas y el histórico de trabajo se regeneran, no se versionan.
+ventas/data/
+ventas/node_modules/
+ventas/package-lock.json
+ventas/assets/vendor/
+
+# El histórico de ventas NO está versionado todavía porque el repo es PÚBLICO
+# (contiene 357 clientes con sus importes). Cuando el repo pase a privado,
+# borrar estas dos líneas y commitear ventas/historico/ y ventas/datos/:
+ventas/historico/
+ventas/datos/
