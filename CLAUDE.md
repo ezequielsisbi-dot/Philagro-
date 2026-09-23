@@ -15,6 +15,13 @@ node verificar.mjs dashboard.html                          # verifica antes de e
 Cada archivo nuevo se **anexa** sobre el histórico existente (el "base"), sin
 re-decidir criterios.
 
+### Formato congelado (confirmado por el usuario, 23/09/2026)
+
+Este es EL dashboard. Cada consulta se actualiza sobre `historico/dashboard.html`,
+sin rehacerlo ni cambiarle la forma. Los dos modos del cuadro Contado/Diferido
+—**Diferido a hoy** y **Diferido por plazo (vto. vs cobro)**, criterio 10— son parte
+del formato y no se tocan.
+
 ### El histórico está en el repo — NO pedírselo al usuario
 
 `historico/dashboard.html` es siempre el último dashboard generado, versionado acá.
