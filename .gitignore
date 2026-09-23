@@ -23,3 +23,9 @@ node_modules/
 # de git aunque después se borren.
 !datos/
 !datos/*.xlsx
+
+# El HISTORICO vive versionado acá: historico/dashboard.html es siempre el
+# ultimo dashboard generado, y de ahi se reconstruye la base en una sesion
+# nueva sin pedirle nada al usuario (pedido explicito, 23/09/2026).
+!historico/
+!historico/dashboard.html

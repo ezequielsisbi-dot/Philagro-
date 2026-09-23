@@ -55,10 +55,11 @@ python3 actualizar.py demo/Cobranzas_demo.xlsx demo/dashboard_demo.html --sin-ba
 node verificar.mjs demo/dashboard_demo.html
 ```
 
-## Privacidad
+## Dónde vive el histórico
 
-Los datos reales no se versionan: `.gitignore` bloquea los `.xlsx` y los dashboards
-generados, salvo los de `demo/`. El dashboard con datos reales se entrega por chat.
+`historico/dashboard.html` es siempre el último dashboard generado. Es la base sobre
+la que se anexa cada Excel nuevo, y está versionado para que el historial no dependa
+de tener el archivo a mano. Los Excel de origen quedan en `datos/`.
 
 Los criterios de cálculo (moneda, signos, conceptos, contado/diferido, redondeo) están
 congelados y documentados en [CLAUDE.md](CLAUDE.md).

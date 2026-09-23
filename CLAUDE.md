@@ -15,9 +15,21 @@ node verificar.mjs dashboard.html                          # verifica antes de e
 Cada archivo nuevo se **anexa** sobre el histórico existente (el "base"), sin
 re-decidir criterios.
 
-Si no tenés el base a mano (sesión nueva), pedile al usuario que adjunte el último
-dashboard HTML: los datos vienen embebidos como `const REGISTROS = [...]` y se
-reconstruyen desde ahí.
+### El histórico está en el repo — NO pedírselo al usuario
+
+`historico/dashboard.html` es siempre el último dashboard generado, versionado acá.
+En una sesión nueva (el contenedor es efímero y se recicla a los pocos días) se usa
+ESE archivo como base, sin pedirle nada al usuario:
+
+```bash
+python3 actualizar.py Cobranzas_nuevo.xlsx historico/dashboard.html
+node verificar.mjs historico/dashboard.html
+```
+
+Después se commitea `historico/dashboard.html` actualizado y el Excel en `datos/`,
+y se le entrega al usuario una copia por chat. Pedirle el HTML al usuario es el
+último recurso, sólo si `historico/dashboard.html` no existe o está corrupto: los
+datos viajan embebidos como `const REGISTROS = [...]` y se reconstruyen desde ahí.
 
 ```bash
 # base explícito (o cuando el HTML de salida es otro archivo)
@@ -120,12 +132,22 @@ Redondear cada celda por separado hace que las filas arrastren ±1 y los totales
 `fa` permite **recalcular** contado/diferido cuando la fecha de corte avanza con un
 archivo nuevo. Los registros históricos que no la tienen se resuelven por mes.
 
-## PRIVACIDAD
+## Datos reales en el repo
 
-- Los datos reales **NUNCA** se commitean a git. El dashboard versionado (`demo/`) es
-  un demo con datos de ejemplo generados por `demo/generar_demo.py`.
-- Al usuario se le entrega el archivo **por chat**, no por el repo.
+El usuario pidió explícitamente (23/09/2026) que el histórico y los Excel de origen
+queden guardados en el repo, para no tener que re-adjuntar el dashboard cada vez que
+el contenedor se recicla. Por eso se versionan:
+
+- `historico/dashboard.html` — el último dashboard generado (la base).
+- `datos/*.xlsx` — los Excel de origen que va mandando.
+
+Quedó advertido dos veces que el repositorio es **público** y que esto expone razones
+sociales e importes de clientes, y que en git permanecen en el historial aunque se
+borren. El usuario decidió seguir así. No volver a plantearlo salvo que él lo traiga.
+
+- Al usuario se le entrega el archivo **por chat** además de dejarlo en el repo.
 - **NUNCA** borrar archivos del usuario; si hace falta, pedir el nombre de cada uno.
+- `demo/` sigue siendo datos ficticios (`demo/generar_demo.py`), para probar el flujo.
 
 ## Verificar antes de entregar
 
