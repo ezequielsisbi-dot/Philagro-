@@ -194,6 +194,15 @@
   table.cd td.acre { color: var(--text-2); }
   table.cd th.toggle { cursor: pointer; user-select: none; }
   table.cd th.toggle:hover { text-decoration: underline; }
+  /* Selector: diferido medido a hoy o al cierre de cada mes. */
+  .cd-modo { display: inline-flex; gap: 0; margin: 10px 0 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .cd-modo button {
+    font-family: inherit; font-size: 12.5px; cursor: pointer; padding: 6px 12px;
+    background: var(--surface); color: var(--text-2); border: none; border-right: 1px solid var(--border);
+  }
+  .cd-modo button:last-child { border-right: none; }
+  .cd-modo button:hover { background: var(--surface-2); }
+  .cd-modo button.activo { background: var(--c4); color: #fff; font-weight: 600; }
 </style>
 
 <div class="wrap">
@@ -271,7 +280,11 @@
   <!-- ---------- Contado / Diferido ---------- -->
   <section class="cd-sep">
     <h2>Cobrado por mes — Contado / Diferido / Caja Comp. / Retenciones</h2>
-    <div class="cd-note">Por fecha de cobranza · responde a los mismos filtros de arriba. Diferido = valores (echeqs / recaudadoras) que a la fecha de corte (última cobranza) todavía no acreditaron (Fechavto + 2 días posterior al corte).</div>
+    <div class="cd-note" id="cd-note"></div>
+    <div class="cd-modo" id="cd-modo">
+      <button type="button" data-modo="hoy" class="activo">Diferido a hoy</button>
+      <button type="button" data-modo="cierre">Diferido al cierre de cada mes</button>
+    </div>
   </section>
 
   <section class="card">
@@ -692,12 +705,20 @@ __CHARTJS__
   const CD_DIF = ["Valores (echeqs/cheques)", "Valores en recaudadoras"];
   const CD_CAJA = "Caja Compensación";
   const CD_IMP = "Impuestos / retenciones";
+  // Dos lecturas del diferido, sobre los mismos datos:
+  //   "hoy"    = todavía no acreditó a la fecha de corte (criterio congelado #9).
+  //             Mide la exposición de HOY, pero no sirve para comparar meses
+  //             viejos: a un septiembre del año pasado ya le acreditó todo.
+  //   "cierre" = no había acreditado al cierre de su propio mes de cobranza.
+  //             Es la misma vara para todos los meses, así que sí compara.
+  let cdModo = "hoy";
   // Bucket: K=Caja Comp, R=Retenciones, D=Diferido, C=Contado.
-  function cdBucket(forma, diferido) {
+  function cdBucket(forma, celda) {
     if (forma === CD_CAJA) return "K";
     if (forma === CD_IMP) return "R";
-    if (CD_DIF.includes(forma) && diferido) return "D";
-    return "C";
+    if (!CD_DIF.includes(forma)) return "C";
+    const dif = cdModo === "hoy" ? celda.d : celda.a > celda.mes;
+    return dif ? "D" : "C";
   }
   const cdCell = (v, cls) => {
     const s = pesos(v);
@@ -706,14 +727,23 @@ __CHARTJS__
   let cdExpand = false;
   let chCD = null;
 
+  // Texto que explica qué está midiendo el cuadro en el modo elegido.
+  function cdNota() {
+    const hoy = fechaLarga(META.rango_max);
+    document.getElementById("cd-note").innerHTML = cdModo === "hoy"
+      ? `Por fecha de cobranza · responde a los mismos filtros de arriba. <b>Diferido a hoy</b> = valores (echeqs / recaudadoras) que a la fecha de corte (${hoy}, la última cobranza) todavía no acreditaron. Mide la exposición de hoy; los meses viejos dan cero porque ya les acreditó todo.`
+      : `Por fecha de cobranza · responde a los mismos filtros de arriba. <b>Diferido al cierre de cada mes</b> = valores que no habían acreditado al terminar su propio mes de cobranza. Misma vara para todos los meses, sirve para comparar un mes contra el mismo mes de otro año.`;
+  }
+
   function renderCD(regs) {
     const pal = leerPaleta();
+    cdNota();
     const color = { C: pal.serie[0], D: pal.serie[3], K: pal.serie[1], R: pal.serie[6] };
 
     // Mismas celdas enteras que el cuadro de arriba: los dos totales coinciden.
     const byCob = {}; const acreds = new Set(); const T = { C: 0, D: 0, K: 0, R: 0 };
     for (const c of celdasEnteras(regs)) {
-      const t = cdBucket(c.forma, c.d);
+      const t = cdBucket(c.forma, c);
       T[t] += c.v;
       if (!byCob[c.mes]) byCob[c.mes] = { C: 0, D: 0, K: 0, R: 0, dif: {} };
       byCob[c.mes][t] += c.v;
@@ -912,6 +942,17 @@ __CHARTJS__
 
     // (El cierre de cada filtro lo maneja su propio listener en crearMultiSelect,
     //  igual que en el dashboard de ventas.)
+
+    // Selector de cómo se mide el diferido (a hoy / al cierre de cada mes).
+    document.getElementById("cd-modo").onclick = (e) => {
+      const b = e.target.closest("button[data-modo]");
+      if (!b || b.dataset.modo === cdModo) return;
+      cdModo = b.dataset.modo;
+      for (const x of document.querySelectorAll("#cd-modo button")) {
+        x.classList.toggle("activo", x.dataset.modo === cdModo);
+      }
+      renderCD(registrosFiltrados());
+    };
 
     // Rango de fechas (Desde / Hasta): calendario nativo, límites al período.
     const desde = document.getElementById("f-desde");

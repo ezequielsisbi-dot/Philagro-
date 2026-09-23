@@ -99,6 +99,18 @@ python3 actualizar.py Cobranzas_2026.xlsx --cuentas
    - Datos históricos sin `Fechavto` se aproximan por mes (diferido si acreditan en el
      mes de corte o después).
 
+10. **Selector de cómo se mide el diferido** (agregado 23/09/2026, a pedido del
+    usuario). El criterio 9 mide la exposición de HOY, así que los meses viejos dan
+    cero: a un septiembre del año pasado ya le acreditó todo, y eso impide comparar
+    un mes contra el mismo mes de otro año. El cuadro Contado/Diferido tiene dos
+    modos, y el default sigue siendo el criterio 9 sin cambios:
+    - **Diferido a hoy** (default): acreditación posterior a la fecha de corte.
+    - **Diferido al cierre de cada mes**: el valor no había acreditado al terminar su
+      propio mes de cobranza (`a > mes`). Misma vara para todos los meses.
+
+    Los dos modos salen de las mismas celdas enteras, así que el total general no
+    cambia: sólo se mueve el reparto entre Contado y Diferido.
+
 ### Redondeo (cómo cierran los cuadros)
 
 Los dos cuadros se calculan sobre la **misma base entera**: se agrupa por la partición
