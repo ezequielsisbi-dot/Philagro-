@@ -259,6 +259,10 @@ def leer_excel(ruta: str, mapa: MapaCuentas, verbose: bool = True) -> tuple[list
             "mes": mes_de(fecha),
             "cliente": cliente,
             "forma": forma,
+            # Nombre crudo de la cuenta contable, tal cual viene del Excel: sirve
+            # para rastrear de dónde salió un movimiento sin tener que abrir el
+            # archivo de origen.
+            "cta": str(val("cuenta") or "").strip(),
             "importe": round(importe, 2),
             "doc": doc,
             # fa = fecha exacta de acreditación (Fechavto + 2 días). Se guarda para
@@ -425,6 +429,7 @@ def generar_html(regs: list[dict], salida: str) -> dict:
     livianos = [{"fecha": r["fecha"], "mes": r["mes"], "cliente": r["cliente"],
                  "forma": r["forma"], "importe": r["importe"], "doc": r["doc"],
                  "a": r["a"], "d": r["d"], "p": r.get("p", -1),
+                 **({"cta": r["cta"]} if r.get("cta") else {}),
                  **({"fa": r["fa"]} if r.get("fa") else {})}
                 for r in regs]
 
