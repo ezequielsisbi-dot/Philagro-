@@ -156,6 +156,24 @@ Redondear cada celda por separado hace que las filas arrastren ±1 y los totales
 `fa` permite **recalcular** contado/diferido cuando la fecha de corte avanza con un
 archivo nuevo. Los registros históricos que no la tienen se resuelven por mes.
 
+## Serie R-00005 — bajo observación
+
+8 recibos de julio 2026 (26 movimientos, 69.352,52 USD) que llegaron en el export de
+enero–septiembre del 14/09 y **no** aparecen en el histórico completo del 23/09. Es la
+única serie R-00005 de todo el período, la única que nunca trae `Fechavto`, y tres de
+sus recibos son íntegramente Caja Compensación —dos a nombre de PHILAGRO S.A, la propia
+empresa—. El usuario cree que fue un error de carga, pero pidió **conservarlos** y
+tenerlos presentes (23/09/2026).
+
+Qué hacer: no borrarlos. Si en un export futuro la serie reaparece, se anexa normal; si
+el usuario confirma la baja, se sacan. Para listarlos:
+
+```bash
+python3 -c "import re,json;h=open('historico/dashboard.html',encoding='utf-8').read();\
+print([r for r in json.loads(re.search(r'^const REGISTROS = (.+?);\s*$',h,re.M).group(1)) \
+if r['doc'].startswith('R-00005')])"
+```
+
 ## Datos reales en el repo
 
 El usuario pidió explícitamente (23/09/2026) que el histórico y los Excel de origen
