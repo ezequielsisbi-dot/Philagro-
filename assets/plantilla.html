@@ -283,7 +283,7 @@
     <div class="cd-note" id="cd-note"></div>
     <div class="cd-modo" id="cd-modo">
       <button type="button" data-modo="hoy" class="activo">Diferido a hoy</button>
-      <button type="button" data-modo="cierre">Diferido al cierre de cada mes</button>
+      <button type="button" data-modo="plazo">Diferido por plazo (vto. vs cobro)</button>
     </div>
   </section>
 
@@ -602,13 +602,14 @@ __CHARTJS__
   function celdasEnteras(regs) {
     const crudo = new Map();
     for (const r of regs) {
-      const k = r.mes + "|" + r.forma + "|" + (r.d ? 1 : 0) + "|" + r.a;
+      const k = r.mes + "|" + r.forma + "|" + (r.d ? 1 : 0) + "|" + r.a + "|" + (r.p === undefined ? -1 : r.p);
       crudo.set(k, (crudo.get(k) || 0) + r.importe);
     }
     const celdas = [];
     for (const [k, v] of crudo) {
       const p = k.split("|");
-      celdas.push({ mes: p[0], forma: p[1], d: p[2] === "1", a: p[3], v: Math.round(v) });
+      celdas.push({ mes: p[0], forma: p[1], d: p[2] === "1", a: p[3],
+                    p: parseInt(p[4], 10), v: Math.round(v) });
     }
     return celdas;
   }
@@ -717,7 +718,11 @@ __CHARTJS__
     if (forma === CD_CAJA) return "K";
     if (forma === CD_IMP) return "R";
     if (!CD_DIF.includes(forma)) return "C";
-    const dif = cdModo === "hoy" ? celda.d : celda.a > celda.mes;
+    // p: 1 = el valor vencía después del día de cobro · 0 = era al día
+    //    -1 = el movimiento no trae Fechavto, se aproxima por mes.
+    const dif = cdModo === "hoy" ? celda.d
+              : celda.p === -1 ? celda.a > celda.mes
+              : celda.p === 1;
     return dif ? "D" : "C";
   }
   const cdCell = (v, cls) => {
@@ -732,7 +737,7 @@ __CHARTJS__
     const hoy = fechaLarga(META.rango_max);
     document.getElementById("cd-note").innerHTML = cdModo === "hoy"
       ? `Por fecha de cobranza · responde a los mismos filtros de arriba. <b>Diferido a hoy</b> = valores (echeqs / recaudadoras) que a la fecha de corte (${hoy}, la última cobranza) todavía no acreditaron. Mide la exposición de hoy; los meses viejos dan cero porque ya les acreditó todo.`
-      : `Por fecha de cobranza · responde a los mismos filtros de arriba. <b>Diferido al cierre de cada mes</b> = valores que no habían acreditado al terminar su propio mes de cobranza. Misma vara para todos los meses, sirve para comparar un mes contra el mismo mes de otro año.`;
+      : `Por fecha de cobranza · responde a los mismos filtros de arriba. <b>Diferido por plazo</b> = el valor vencía DESPUÉS del día en que se cobró: se recibió un pago a plazo. Un cheque al día cuenta como contado. No depende de cuánto tiempo pasó, así que compara un mes contra el mismo mes de otro año.${META.plazo_desde ? ` <b style="color:var(--c8)">Sólo desde ${META.plazo_desde}</b>: los movimientos anteriores no traen Fechavto y se aproximan por mes de acreditación.` : ""}`;
   }
 
   function renderCD(regs) {

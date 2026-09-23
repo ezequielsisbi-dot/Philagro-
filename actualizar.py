@@ -353,9 +353,16 @@ def marcar_contado_diferido(regs: list[dict], corte: str) -> None:
         if r["forma"] not in FORMAS_DIFERIBLES:
             r["a"] = r["mes"]
             r["d"] = 0
+            r["p"] = 0
         elif fa:
             r["a"] = fa[:7]
             r["d"] = 1 if fa > corte else 0
+            # p = el valor vence DESPUÉS del día en que se cobró, o sea que se
+            # recibió un pago a plazo. fa es Fechavto + DIAS_ACREDITACION, así
+            # que se le restan para comparar vencimiento contra fecha de cobro:
+            # un cheque al día (vto = fecha de cobro) NO es diferido.
+            vto = (dt.date.fromisoformat(fa) - dt.timedelta(days=DIAS_ACREDITACION))
+            r["p"] = 1 if vto.isoformat() > r["fecha"] else 0
         else:
             # Histórico sin Fechavto: 'a' es lo que haya quedado guardado
             # (o el mes de cobro si nunca se supo).
@@ -369,6 +376,8 @@ def marcar_contado_diferido(regs: list[dict], corte: str) -> None:
                 # respeta lo que ya se había decidido; si nunca se decidió,
                 # se considera diferido.
                 r["d"] = 1 if r.get("d", 1) else 0
+        # Sin Fechavto no hay con qué comparar el vencimiento: -1 = no se sabe.
+        r.setdefault("p", -1)
 
 
 # --------------------------------------------------------------------------- #
@@ -390,7 +399,17 @@ def generar_html(regs: list[dict], salida: str) -> dict:
     fechas = [r["fecha"] for r in regs]
     docs = {r["doc"] for r in regs if r["doc"]}
 
+    # Desde qué mes se puede medir el plazo (vencimiento vs fecha de cobro):
+    # hace falta Fechavto, y el histórico viejo no la trae. Si falta en algún
+    # movimiento de valores, el dashboard lo avisa.
+    sin_plazo = [r["mes"] for r in regs
+                 if r["forma"] in FORMAS_DIFERIBLES and r.get("p", -1) == -1]
+    con_plazo = [r["mes"] for r in regs
+                 if r["forma"] in FORMAS_DIFERIBLES and r.get("p", -1) != -1]
+    plazo_desde = etiqueta_mes(min(con_plazo)) if (sin_plazo and con_plazo) else ""
+
     meta = {
+        "plazo_desde": plazo_desde,
         "moneda_codigo": MONEDA["codigo"],
         "moneda_nombre": MONEDA["nombre"],
         "generado": dt.date.today().strftime("%d/%m/%Y"),
@@ -405,7 +424,8 @@ def generar_html(regs: list[dict], salida: str) -> dict:
     # recalcular contado/diferido en la próxima actualización).
     livianos = [{"fecha": r["fecha"], "mes": r["mes"], "cliente": r["cliente"],
                  "forma": r["forma"], "importe": r["importe"], "doc": r["doc"],
-                 "a": r["a"], "d": r["d"], **({"fa": r["fa"]} if r.get("fa") else {})}
+                 "a": r["a"], "d": r["d"], "p": r.get("p", -1),
+                 **({"fa": r["fa"]} if r.get("fa") else {})}
                 for r in regs]
 
     def dump(obj: Any) -> str:

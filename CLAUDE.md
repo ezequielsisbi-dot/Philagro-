@@ -105,8 +105,13 @@ python3 actualizar.py Cobranzas_2026.xlsx --cuentas
     un mes contra el mismo mes de otro año. El cuadro Contado/Diferido tiene dos
     modos, y el default sigue siendo el criterio 9 sin cambios:
     - **Diferido a hoy** (default): acreditación posterior a la fecha de corte.
-    - **Diferido al cierre de cada mes**: el valor no había acreditado al terminar su
-      propio mes de cobranza (`a > mes`). Misma vara para todos los meses.
+    - **Diferido por plazo (vto. vs cobro)**: el valor vencía DESPUÉS del día en que
+      se cobró (`Fechavto > fecha de cobro`, campo `p` del registro). Un cheque al día
+      es contado. No depende de cuánto tiempo pasó, así que compara meses entre sí.
+      Requiere `Fechavto`: los movimientos que no la traen (todo 2024 y 2025, que
+      vinieron del dashboard original) se aproximan por mes de acreditación y el
+      dashboard lo avisa arriba del cuadro (`META.plazo_desde`). Para que sea exacto
+      hay que re-exportar esos años con la columna Fechavto.
 
     Los dos modos salen de las mismas celdas enteras, así que el total general no
     cambia: sólo se mueve el reparto entre Contado y Diferido.
