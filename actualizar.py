@@ -356,6 +356,33 @@ def anexar(base: list[dict], nuevos: list[dict]) -> tuple[list[dict], dict]:
     return resultado, control
 
 
+def reemplazar_meses(base: list[dict], nuevos: list[dict]) -> tuple[list[dict], dict]:
+    """El archivo nuevo manda sobre los meses que trae: se saca del histórico
+    todo lo de esos meses y se pone lo del archivo. Lo de los demás meses queda
+    intacto. Se usa cuando un export corrige a otro anterior."""
+    meses = {r["mes"] for r in nuevos}
+    fuera = [r for r in base if r["mes"] in meses]
+    resto = [r for r in base if r["mes"] not in meses]
+
+    docs_fuera = {r["doc"] for r in fuera if r["doc"]}
+    docs_nuevos = {r["doc"] for r in nuevos if r["doc"]}
+    control = {
+        "meses_reemplazados": sorted(meses),
+        "recibos_base": len({r["doc"] for r in base if r["doc"]}),
+        "recibos_nuevo": len(docs_nuevos),
+        "recibos_ya_estaban": len(docs_fuera & docs_nuevos),
+        "recibos_agregados": len(docs_nuevos - docs_fuera),
+        "recibos_eliminados": sorted(docs_fuera - docs_nuevos),
+        "movs_base": len(base),
+        "movs_nuevo": len(nuevos),
+        "movs_eliminados": len(fuera),
+        "importe_eliminado": sum(r["importe"] for r in fuera if r["doc"] not in docs_nuevos),
+        "ajustes_sin_doc_agregados": 0,
+        "ajustes_sin_doc_omitidos": 0,
+    }
+    return resto + nuevos, control
+
+
 # --------------------------------------------------------------------------- #
 # Contado / Diferido
 # --------------------------------------------------------------------------- #
@@ -492,6 +519,10 @@ def main() -> None:
                          "se usa como base histórica y se sobrescribe.")
     ap.add_argument("--base", help="Dashboard HTML previo del que tomar el histórico "
                                    "(si no se indica, se usa el propio archivo de salida).")
+    ap.add_argument("--reemplazar", action="store_true",
+                    help="El Excel es LA verdad para los meses que trae: se borran del "
+                         "histórico todos los movimientos de esos meses y se ponen los "
+                         "del archivo. Sirve cuando un export corrige a otro anterior.")
     ap.add_argument("--sin-base", action="store_true",
                     help="Ignorar el histórico y generar sólo con este Excel.")
     ap.add_argument("--cuentas", action="store_true",
@@ -555,7 +586,10 @@ def main() -> None:
         print("Base: no hay histórico previo, se arranca desde este Excel.")
 
     total_antes = sum(r["importe"] for r in base)
-    regs, control = anexar(base, nuevos)
+    if args.reemplazar and nuevos:
+        regs, control = reemplazar_meses(base, nuevos)
+    else:
+        regs, control = anexar(base, nuevos)
 
     corte = max((r["fecha"] for r in regs), default="")
     marcar_contado_diferido(regs, corte)
@@ -564,6 +598,14 @@ def main() -> None:
 
     cod = MONEDA["codigo"] if info["usa_usd"] else "ARS"
     print("\n--- Control de anexado ---------------------------------------")
+    if control.get("meses_reemplazados"):
+        print(f"  MODO REEMPLAZO de: {', '.join(control['meses_reemplazados'])}")
+        print(f"  Movimientos borrados de esos meses  {control['movs_eliminados']:>8}")
+        if control["recibos_eliminados"]:
+            print(f"  Recibos que dejan de estar ...   {len(control['recibos_eliminados']):>8}"
+                  f"  ({plata(control['importe_eliminado'])} USD)")
+            for doc in control["recibos_eliminados"][:15]:
+                print(f"      {doc}")
     print(f"  Recibos en el base ............ {control['recibos_base']:>8}")
     print(f"  Recibos en el archivo nuevo ... {control['recibos_nuevo']:>8}")
     print(f"  Ya estaban (se reemplazaron) .. {control['recibos_ya_estaban']:>8}")

@@ -167,7 +167,16 @@ descarta antes de nada, avisando cuántas sacó. No son forma de cobro. Comproba
 28/09/2026: excluyendo las 376 líneas de `Deudores Por Ventas`, los 152 recibos que ya
 estaban en el histórico dieron el mismo importe al centavo (1.308.321,00 USD).
 
-## Serie R-00005 — resuelta (28/09/2026)
+### `--reemplazar`: cuando un export corrige a otro
+
+`python3 actualizar.py <excel> historico/dashboard.html --reemplazar` borra del
+histórico **todos los movimientos de los meses que trae el Excel** y los sustituye por
+los del archivo. Los demás meses no se tocan. Es para cuando el usuario dice "este es
+el correcto": el anexado normal nunca saca un recibo, así que los que el export nuevo
+ya no trae se quedarían para siempre. El control lista uno por uno los recibos que
+dejan de estar y cuánto suman.
+
+## Serie R-00005 — dada de baja en septiembre (28/09/2026)
 
 8 recibos de julio 2026 (26 movimientos, 69.352,52 USD) que llegaron en el export de
 enero–septiembre del 14/09 y **no** aparecen en el histórico completo del 23/09. Es la
@@ -175,9 +184,18 @@ enero–septiembre del 14/09 y **no** aparecen en el histórico completo del 23/
 sus recibos son íntegramente Caja Compensación —dos a nombre de PHILAGRO S.A, la propia
 empresa—. El usuario creyó que era un error de carga y pidió conservarlos (23/09/2026).
 
-**La serie está viva.** El export del 28/09 la trajo con 12 recibos más (260.797,08 USD),
-así que no era un error: el reporte del 23/09 simplemente la dejaba afuera. Se anexa como
-cualquier otra y no hay nada que corregir. Para listarlos:
+Historia de la serie, en orden:
+
+1. El export del 28/09 de las 12:28 la trajo con 12 recibos de septiembre (260.797,08 USD),
+   lo que parecía confirmar que la serie era legítima.
+2. Media hora después el usuario mandó el septiembre **corregido**, que NO la incluye, con
+   la indicación de tomarlo como el bueno. Se corrió con `--reemplazar` y esos 12 recibos
+   salieron del histórico.
+
+O sea que R-00005 **no** cuenta como cobranza. Quedan en el histórico los 8 recibos de
+**julio 2026** (69.352,52 USD), que el usuario pidió conservar el 23/09 y sobre los que
+todavía no se pronunció después de esta corrección: preguntar antes de sacarlos. Para
+listarlos:
 
 ```bash
 python3 -c "import re,json;h=open('historico/dashboard.html',encoding='utf-8').read();\
