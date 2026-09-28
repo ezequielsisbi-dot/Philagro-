@@ -179,18 +179,33 @@ def fusionar(historico: list, nuevas: pd.DataFrame) -> list:
     conservados = [f for f in historico if f["mes"] not in meses_nuevos]
     nuevas_filas = nuevas.to_dict(orient="records")
 
+    # Ventana de fechas que cubre el Excel nuevo, por mes. Un export suele traer
+    # el mes entero, pero puede traer una ventana ("del 21 al 28"): las filas del
+    # histórico anteriores al primer día exportado no son anomalías, quedaron
+    # fuera del recorte. Separarlas evita ahogar una pérdida real entre cientos
+    # de avisos inocuos.
+    ventana = {}
+    for fila in nuevas_filas:
+        desde, hasta = ventana.get(fila["mes"], (fila["fecha"], fila["fecha"]))
+        ventana[fila["mes"]] = (min(desde, fila["fecha"]), max(hasta, fila["fecha"]))
+
     # Filas del historico, en los meses reemplazados, que el Excel nuevo no trae.
     pisados = [f for f in historico if f["mes"] in meses_nuevos]
     nuevas_por_clave = Counter(_clave_contenido(f) for f in nuevas_filas)
     vistas = Counter()
-    rescatadas = []
+    rescatadas = []       # dentro de la ventana: el export deberia traerlas y no lo hace
+    fuera_ventana = []    # fuera de la ventana: normales, el recorte no las alcanza
     for fila in pisados:
         clave = _clave_contenido(fila)
         vistas[clave] += 1
         if vistas[clave] > nuevas_por_clave.get(clave, 0):
-            rescatadas.append(fila)
+            desde, hasta = ventana[fila["mes"]]
+            if desde <= fila["fecha"] <= hasta:
+                rescatadas.append(fila)
+            else:
+                fuera_ventana.append(fila)
 
-    fusionado = conservados + nuevas_filas + rescatadas
+    fusionado = conservados + nuevas_filas + rescatadas + fuera_ventana
 
     nuevos_por_mes = {}
     for fila in nuevas_filas:
@@ -202,20 +217,30 @@ def fusionar(historico: list, nuevas: pd.DataFrame) -> list:
     for mes in sorted(meses_nuevos):
         antes = len(viejos_por_mes.get(mes, set()))
         despues = len(nuevos_por_mes.get(mes, set()))
+        desde, hasta = ventana[mes]
+        recorte = "" if (desde[-2:], hasta[-2:]) == ("01", "31") else f"  [export {desde[-2:]} al {hasta[-2:]}]"
         if mes in viejos_por_mes:
-            print(f"  {mes}: reemplazado — comprobantes {antes} -> {despues}")
+            print(f"  {mes}: reemplazado — comprobantes {antes} -> {despues}{recorte}")
         else:
-            print(f"  {mes}: mes nuevo — {despues} comprobantes agregados.")
+            print(f"  {mes}: mes nuevo — {despues} comprobantes agregados.{recorte}")
+
+    if fuera_ventana:
+        dias = sorted({f["fecha"] for f in fuera_ventana})
+        print(f"\n  {len(fuera_ventana)} fila(s) del histórico quedaron FUERA de la ventana "
+              f"del export ({dias[0]} a {dias[-1]}): se conservan intactas.")
 
     if rescatadas:
-        print(f"\n  ATENCION: {len(rescatadas)} fila(s) del histórico que el Excel nuevo NO trae.")
+        print(f"\n  ATENCION: {len(rescatadas)} fila(s) DENTRO de la ventana del export "
+              f"que el Excel nuevo NO trae.")
         print("  Se CONSERVAN (no se pierde nada). Revisar si fueron anuladas en el sistema:")
         for fila in sorted(rescatadas, key=lambda f: (f["fecha"], str(f["cliente"]))):
             print(f"    {fila['fecha']} | {str(fila['cliente'])[:26]:26} | "
                   f"{str(fila['producto'])[:26]:26} | {fila['importe']:>10.2f} | "
                   f"comp {fila['comprobante']}")
-    else:
+    elif not fuera_ventana:
         print("  Verificación de pérdida: 0 filas del histórico quedaron fuera.")
+    else:
+        print("  Verificación de pérdida: 0 filas perdidas dentro de la ventana del export.")
 
     meses_conservados = sorted({f["mes"] for f in conservados})
     if meses_conservados:
