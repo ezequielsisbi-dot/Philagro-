@@ -128,8 +128,20 @@ class MapaCuentas:
         with open(ruta, encoding="utf-8") as fh:
             cfg = json.load(fh)
         self.reglas = [(re.compile(r["patron"]), r["concepto"]) for r in cfg["reglas"]]
+        # Cuentas que no son forma de cobro sino la contrapartida del asiento.
+        self.excluir = [re.compile(r["patron"]) for r in cfg.get("excluir", [])]
         self.por_defecto = cfg.get("por_defecto", "Otros")
         self.sin_mapear: Counter[str] = Counter()
+        self.excluidas: Counter[str] = Counter()
+
+    def es_contrapartida(self, cuenta: Any) -> bool:
+        """True si la cuenta es la otra punta del asiento (p. ej. Deudores Por
+        Ventas): esas líneas no son un cobro y se descartan al leer."""
+        nombre = normalizar(cuenta)
+        if any(p.search(nombre) for p in self.excluir):
+            self.excluidas[str(cuenta).strip()] += 1
+            return True
+        return False
 
     def concepto(self, cuenta: Any) -> str:
         nombre = normalizar(cuenta)
@@ -249,6 +261,9 @@ def leer_excel(ruta: str, mapa: MapaCuentas, verbose: bool = True) -> tuple[list
         else:  # sin columna de importe: se deriva de Debe/Haber
             importe = a_numero(val("debe")) - a_numero(val("haber"))
 
+        if mapa.es_contrapartida(val("cuenta")):
+            continue
+
         cliente = str(val("cliente") or "SIN CLIENTE").strip() or "SIN CLIENTE"
         doc = str(val("documento") or "").strip()
         forma = mapa.concepto(val("cuenta"))
@@ -271,6 +286,7 @@ def leer_excel(ruta: str, mapa: MapaCuentas, verbose: bool = True) -> tuple[list
         })
 
     info = {"filas": len(filas), "fila_encabezado": fila_enc + 1, "descartadas": descartadas,
+            "excluidas": sum(mapa.excluidas.values()),
             "usa_usd": usa_usd, "columnas": sorted(cols)}
     return movs, info
 
@@ -503,6 +519,10 @@ def main() -> None:
               f"{len(nuevos)} movimientos · columnas: {', '.join(info['columnas'])}")
         if info["descartadas"]:
             print(f"  {info['descartadas']} filas sin fecha descartadas (títulos, totales, vacías).")
+        if mapa.excluidas:
+            print(f"  {sum(mapa.excluidas.values())} líneas de contrapartida excluidas "
+                  f"(no son forma de cobro): "
+                  + ", ".join(f"{c} ({n})" for c, n in mapa.excluidas.most_common()))
     else:
         if args.sin_base or not (args.base or os.path.exists(args.salida)):
             sys.exit("Sin Excel hay que indicar un histórico: "

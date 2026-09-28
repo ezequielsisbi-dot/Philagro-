@@ -4,7 +4,8 @@
     "Se evalúa EN ORDEN: gana la primera regla cuyo patrón (regex, sin acentos y en",
     "minúsculas) aparece en el nombre de la cuenta. Para agregar una cuenta nueva",
     "basta con sumar un patrón acá; no hace falta tocar actualizar.py.",
-    "Verificá el resultado con: python3 actualizar.py <archivo.xlsx> --cuentas"
+    "Verificá el resultado con: python3 actualizar.py <archivo.xlsx> --cuentas",
+    "'excluir' saca del cálculo las cuentas que NO son forma de cobro sino la contrapartida del asiento (el crédito del cliente que se cancela). Algunos exports salen con las dos puntas y entonces el archivo suma cero."
   ],
   "reglas": [
     {
@@ -41,5 +42,11 @@
       "concepto": "Bancos / transferencias"
     }
   ],
-  "por_defecto": "Otros"
+  "por_defecto": "Otros",
+  "excluir": [
+    {
+      "patron": "^deudores +por +ventas$",
+      "_nota": "Contrapartida de la cobranza. Visto el 28/09/2026: el export traía 376 líneas por -1.698.308,16 USD, espejo exacto de las 566 líneas de cobro."
+    }
+  ]
 }
