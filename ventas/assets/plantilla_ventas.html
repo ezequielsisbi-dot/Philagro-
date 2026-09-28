@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard de Ventas — Philagro S.A.</title>
+<style>
+  /* ---------- Sistema de diseño propio ---------- */
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --surface-2:   #f2f2ef;
+    --border:      rgba(11,11,11,0.10);
+    --text:        #0b0b0b;
+    --text-2:      #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --axis:        #c3c2b7;
+    --accent:      #2a78d6;
+    --c1:#2a78d6; --c2:#008300; --c3:#e87ba4; --c4:#eda100;
+    --c5:#1baf7a; --c6:#eb6834; --c7:#4a3aa7; --c8:#e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface:     #1a1a19;
+      --surface-2:   #242422;
+      --border:      rgba(255,255,255,0.10);
+      --text:        #ffffff;
+      --text-2:      #c3c2b7;
+      --muted:       #898781;
+      --grid:        #2c2c2a;
+      --axis:        #383835;
+      --accent:      #3987e5;
+      --c1:#3987e5; --c2:#008300; --c3:#d55181; --c4:#c98500;
+      --c5:#199e70; --c6:#d95926; --c7:#9085e9; --c8:#e66767;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text);
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+
+  header.top { margin-bottom: 20px; }
+  header.top h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header.top .sub { color: var(--text-2); font-size: 13px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  /* ---------- KPIs ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+  .kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .kpi .value { font-size: 26px; font-weight: 650; margin-top: 6px; letter-spacing: -0.02em; }
+  .kpi .value.small { font-size: 17px; line-height: 1.25; }
+  .kpi .hint { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+  @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ---------- Filtros ---------- */
+  .filtros { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-bottom: 18px; }
+  .filtros .campo { display: flex; flex-direction: column; gap: 4px; }
+  .filtros label { font-size: 12px; color: var(--muted); }
+  /* Sólo los controles nativos (hijos directos de .campo); NO los inputs del multi-select. */
+  .filtros .campo > select, .filtros .campo > input {
+    font-family: inherit; font-size: 14px; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; min-width: 175px;
+  }
+  .filtros .campo > input.fecha { min-width: 140px; }
+  .filtros .campo > input:focus, .filtros .campo > select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn {
+    font-family: inherit; font-size: 13px; cursor: pointer;
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .contador { margin-left: auto; font-size: 13px; color: var(--text-2); align-self: center; }
+
+  /* ---------- Multi-select (chips + buscador + checkboxes) ---------- */
+  .ms { position: relative; min-width: 210px; }
+  .ms.ms-corto { min-width: 120px; }
+  .ms-control {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 4px 26px 4px 6px; min-height: 36px; cursor: text; position: relative;
+  }
+  .ms-control:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ms-chip {
+    display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 1px 4px 1px 8px; font-size: 12.5px;
+  }
+  .ms-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+  .ms-chip button { border: none; background: none; color: var(--muted); cursor: pointer;
+    font-size: 15px; line-height: 1; padding: 0 2px; }
+  .ms-chip button:hover { color: var(--c8); }
+  .ms-input { flex: 1; min-width: 60px; border: none; outline: none; background: transparent;
+    color: var(--text); font-family: inherit; font-size: 14px; padding: 3px 2px; }
+  .ms-caret { position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+    color: var(--muted); pointer-events: none; font-size: 11px; }
+  .ms-panel {
+    position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0;
+    max-height: 260px; overflow-y: auto; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18); padding: 4px;
+  }
+  .ms-tools { display: flex; justify-content: space-between; padding: 4px 6px 6px;
+    border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .ms-tools button { border: none; background: none; color: var(--accent); cursor: pointer;
+    font-family: inherit; font-size: 12px; padding: 0; }
+  .ms-tools button:hover { text-decoration: underline; }
+  .ms-opt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+    font-size: 13.5px; cursor: pointer; }
+  .ms-opt:hover { background: var(--surface-2); }
+  .ms-opt input { accent-color: var(--accent); flex-shrink: 0; width: auto; min-width: 0; margin: 0; }
+  .ms-opt span { flex: 1 1 auto; min-width: 0; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ms-vacio { padding: 10px; color: var(--muted); font-size: 13px; text-align: center; }
+
+  /* ---------- Gráficos ---------- */
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .chart-card h3 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+  .chart-box { position: relative; height: 300px; }
+  .chart-card.wide { grid-column: 1 / -1; }
+  .chart-card.wide .chart-box { height: 320px; }
+  @media (max-width: 820px) { .charts { grid-template-columns: 1fr; } .chart-card.wide { grid-column: auto; } }
+
+  /* ---------- Tablas ---------- */
+  .tabla-card h3 { font-size: 14px; margin: 0 0 4px; font-weight: 600; display:inline-block; }
+  .tabla-card .sub-tabla { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .tabla-scroll { overflow-x: auto; max-height: 560px; overflow-y: auto; }
+  .sec-sep { margin: 30px 0 14px; }
+  .sec-sep h2 { font-size: 18px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sec-sep .nota { font-size: 12px; color: var(--muted); }
+  .dim-select { margin-left: 10px; font-family: inherit; font-size: 13px; color: var(--text);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; }
+
+  table.pivot { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 560px; }
+  table.pivot th {
+    font-weight: 600; color: var(--text-2); white-space: nowrap;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--surface); z-index: 2;
+  }
+  table.pivot th.corner { text-align: left; }
+  table.pivot th.anio { text-align: center; font-weight: 600; color: var(--text); border-bottom: 1px solid var(--grid); }
+  table.pivot th.mes { text-align: right; font-variant-numeric: tabular-nums; }
+  table.pivot th.tot, table.pivot td.tot { text-align: right; }
+  table.pivot tbody td { padding: 9px 12px; border-bottom: 1px solid var(--grid); }
+  table.pivot tbody tr:hover { background: var(--surface-2); }
+  table.pivot th.corner, table.pivot tbody td:first-child {
+    position: sticky; left: 0; z-index: 1; background: var(--surface);
+  }
+  table.pivot th.corner { z-index: 3; }
+  table.pivot tbody tr:hover td:first-child { background: var(--surface-2); }
+  table.pivot tfoot td:first-child { position: sticky; left: 0; z-index: 1; }
+  table.pivot td.num, table.pivot th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.pivot td.cero { color: var(--muted); }
+  table.pivot th.tot, table.pivot td.tot { background: var(--surface-2); font-weight: 650; }
+  table.pivot tfoot td {
+    padding: 11px 12px; font-weight: 700; border-top: 2px solid var(--border);
+    font-variant-numeric: tabular-nums; background: var(--surface-2);
+    position: sticky; bottom: 0; z-index: 1;
+  }
+  .badge { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px;
+    border: 1px solid var(--border); white-space: nowrap; }
+  .vacio { text-align: center; color: var(--muted); padding: 40px 10px; font-size: 14px; }
+  td.txt { white-space: normal; color: var(--text-2); font-size: 12.5px; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>Dashboard de Ventas — Philagro S.A.</h1>
+    <div class="sub" id="subheader"></div>
+  </header>
+
+  <!-- KPIs -->
+  <section class="kpis" id="kpis"></section>
+
+  <!-- Filtros -->
+  <section class="filtros card">
+    <div class="campo"><label>Año</label><div class="ms ms-corto" id="ms-anio"></div></div>
+    <div class="campo"><label>Mes</label><div class="ms" id="ms-mes"></div></div>
+    <div class="campo"><label for="f-desde">Desde</label><input type="date" id="f-desde" class="fecha"></div>
+    <div class="campo"><label for="f-hasta">Hasta</label><input type="date" id="f-hasta" class="fecha"></div>
+    <div class="campo"><label>Vendedor</label><div class="ms" id="ms-vendedor"></div></div>
+    <div class="campo"><label>Cliente</label><div class="ms" id="ms-cliente"></div></div>
+    <div class="campo"><label>Producto</label><div class="ms" id="ms-producto"></div></div>
+    <button class="btn" id="f-limpiar">Limpiar filtros</button>
+    <span class="contador" id="contador"></span>
+  </section>
+
+  <!-- Gráficos -->
+  <section class="charts">
+    <div class="card chart-card"><h3>Ventas por mes (USD)</h3><div class="chart-box"><canvas id="chartMes"></canvas></div></div>
+    <div class="card chart-card"><h3 id="chartTopTit">Top 15</h3><div class="chart-box"><canvas id="chartTop"></canvas></div></div>
+  </section>
+
+  <!-- Cuadro dinámico: Ventas por [dimensión] y mes -->
+  <section class="card tabla-card">
+    <h3>Ventas por</h3>
+    <select id="dim-select" class="dim-select">
+      <option value="v">Vendedor</option>
+      <option value="p">Producto</option>
+      <option value="c">Cliente</option>
+      <option value="pa">Principio activo</option>
+      <option value="cp">Condición de pago</option>
+    </select>
+    <span style="font-size:14px;font-weight:600"> y mes</span>
+    <div class="sub-tabla" id="sub-pivot"></div>
+    <div class="tabla-scroll">
+      <table class="pivot"><thead id="p-thead"></thead><tbody id="p-tbody"></tbody><tfoot id="p-tfoot"></tfoot></table>
+    </div>
+  </section>
+
+  <!-- Ventas por mes × año -->
+  <section class="sec-sep"><h2>Ventas por mes y año</h2>
+    <div class="nota">Filas = meses · columnas = años calendario · importes en USD (enteros)</div></section>
+  <section class="card tabla-card">
+    <div class="tabla-scroll">
+      <table class="pivot"><thead id="m-thead"></thead><tbody id="m-tbody"></tbody><tfoot id="m-tfoot"></tfoot></table>
+    </div>
+  </section>
+
+  <!-- Cantidades por producto -->
+  <section class="sec-sep"><h2>Cantidades por producto</h2>
+    <div class="nota">Unidades vendidas (campo Cantidad) por producto y mes · responde a los filtros</div></section>
+  <section class="card tabla-card">
+    <div class="tabla-scroll">
+      <table class="pivot"><thead id="q-thead"></thead><tbody id="q-tbody"></tbody><tfoot id="q-tfoot"></tfoot></table>
+    </div>
+  </section>
+
+  <!-- Precios por producto -->
+  <section class="sec-sep"><h2>Precios por producto</h2>
+    <div class="nota">Precio unitario promedio <b>ponderado por USD</b> — Σ(precio × importe) / Σ(importe) · por mes</div></section>
+  <section class="card tabla-card">
+    <div class="tabla-scroll">
+      <table class="pivot"><thead id="pr-thead"></thead><tbody id="pr-tbody"></tbody><tfoot id="pr-tfoot"></tfoot></table>
+    </div>
+  </section>
+
+  <!-- Plazos por producto -->
+  <section class="sec-sep"><h2>Plazos por producto</h2>
+    <div class="nota">Plazo máximo (días) al que se vendió cada producto, con clientes, cantidad y precio unitario en esa venta · excluye condiciones no numéricas (canje, plataformas, tarjeta)</div></section>
+  <section class="card tabla-card">
+    <div class="tabla-scroll">
+      <table class="pivot"><thead id="pl-thead"></thead><tbody id="pl-tbody"></tbody></table>
+    </div>
+  </section>
+
+  <!-- Comparativo por año -->
+  <section class="sec-sep"><h2>Comparativo por año</h2>
+    <div class="nota" id="comp-nota">Barras por mes, una serie por año · compará los años/meses que selecciones en los filtros</div></section>
+  <section class="card chart-card">
+    <div class="chart-box" style="height:360px"><canvas id="chartComp"></canvas></div>
+  </section>
+</div>
+
+<!-- ---------- Datos embebidos (autocontenido, sin fetch) ---------- -->
+<script>
+/*__DATOS_JS__*/
+</script>
+
+<!-- ---------- Chart.js vendorizado inline ---------- -->
+<script>/*__CHARTJS__*/</script>
+
+<!-- ---------- Lógica del dashboard ---------- -->
+<script>
+(function () {
+  "use strict";
+
+  const fmtMoneda = new Intl.NumberFormat("es-AR", { style:"currency", currency:"USD", minimumFractionDigits:2, maximumFractionDigits:2 });
+  const fmtMoneda0 = new Intl.NumberFormat("es-AR", { style:"currency", currency:"USD", minimumFractionDigits:0, maximumFractionDigits:0 });
+  const fmtCompacto = new Intl.NumberFormat("es-AR", { notation:"compact", maximumFractionDigits:1 });
+  const fmtEntero = new Intl.NumberFormat("es-AR");
+  const money = (v) => fmtMoneda.format(v || 0);
+  const money0 = (v) => fmtMoneda0.format(v || 0);
+  const compact = (v) => "$" + fmtCompacto.format(v || 0);
+  const miles = (v) => `US$ ${fmtEntero.format(Math.trunc((v || 0) / 1000))} mil`;
+
+  const MESES_ABBR = ["ene.","feb.","mar.","abr.","may.","jun.","jul.","ago.","sep.","oct.","nov.","dic."];
+  const MESES_LARGO = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  function fechaLarga(iso){ const [y,m,d]=iso.split("-"); return d+" "+MESES_ABBR[parseInt(m,10)-1]+" "+y; }
+
+  function leerPaleta(){
+    const cs = getComputedStyle(document.documentElement);
+    const g = (n)=>cs.getPropertyValue(n).trim();
+    return { serie: Array.from({length:8},(_,i)=>g("--c"+(i+1))),
+      texto:g("--text"), texto2:g("--text-2"), muted:g("--muted"), grid:g("--grid"), surface:g("--surface") };
+  }
+
+  // Catálogos por dimensión (para resolver índices -> nombre y ordenar).
+  const CAT = { v: VENDEDORES, p: PRODUCTOS, c: CLIENTES, pa: PRINCIPIOS, cp: CONDICIONES.map(x=>x.n) };
+  const DIM_LABEL = { v:"Vendedor", p:"Producto", c:"Cliente", pa:"Principio activo", cp:"Condición de pago" };
+
+  const estado = { desde:"", hasta:"", dim:"v" };
+  // Selecciones múltiples (Set de valores). Se llenan al crear cada multi-select.
+  const MS = { anio:null, mes:null, v:null, c:null, p:null };
+
+  function registrosFiltrados(){
+    const sy = MS.anio && MS.anio.seleccion, sm = MS.mes && MS.mes.seleccion;
+    const sv = MS.v && MS.v.seleccion, sc = MS.c && MS.c.seleccion, sp = MS.p && MS.p.seleccion;
+    return REGISTROS.filter((r)=>{
+      if (sy && sy.size && !sy.has(r.m.slice(0,4))) return false;
+      if (sm && sm.size && !sm.has(r.m.slice(5,7))) return false;
+      if (estado.desde && r.f < estado.desde) return false;
+      if (estado.hasta && r.f > estado.hasta) return false;
+      if (sv && sv.size && !sv.has(VENDEDORES[r.v])) return false;
+      if (sc && sc.size && !sc.has(CLIENTES[r.c])) return false;
+      if (sp && sp.size && !sp.has(PRODUCTOS[r.p])) return false;
+      return true;
+    });
+  }
+
+  // ----- Componente multi-select (chips + buscador + checkboxes) -----
+  // items: array de strings, o de {v,t} (valor guardado / texto mostrado).
+  function crearMultiSelect(contId, items, placeholder, onChange){
+    const cont = document.getElementById(contId);
+    const norm = items.map((it)=> (typeof it === "string") ? {v:it, t:it} : it);
+    const txt = new Map(norm.map((o)=>[o.v, o.t]));   // valor -> etiqueta (para chips)
+    const seleccion = new Set();
+    cont.innerHTML = `
+      <div class="ms-control">
+        <span class="ms-chips"></span>
+        <input class="ms-input" placeholder="${escapeHtml(placeholder)}" autocomplete="off">
+        <span class="ms-caret">▾</span>
+      </div>
+      <div class="ms-panel" hidden></div>`;
+    const control = cont.querySelector(".ms-control");
+    const chips = cont.querySelector(".ms-chips");
+    const input = cont.querySelector(".ms-input");
+    const panel = cont.querySelector(".ms-panel");
+
+    const visibles = (filtro)=>{
+      const q = (filtro||"").trim().toLowerCase();
+      return norm.filter((o)=> !q || o.t.toLowerCase().includes(q));
+    };
+    function renderPanel(filtro){
+      const vis = visibles(filtro);
+      const opts = vis.slice(0, 300).map((o)=>
+        `<label class="ms-opt"><input type="checkbox" ${seleccion.has(o.v)?"checked":""} value="${escapeHtml(o.v)}"><span>${escapeHtml(o.t)}</span></label>`
+      ).join("");
+      const tools = `<div class="ms-tools"><button data-a="todos">Marcar ${vis.length>1?"visibles":""}</button><button data-a="ninguno">Limpiar</button></div>`;
+      panel.innerHTML = (vis.length? tools : "") + (opts || `<div class="ms-vacio">Sin coincidencias</div>`);
+    }
+    function renderChips(){
+      chips.innerHTML = Array.from(seleccion).map((v)=>
+        `<span class="ms-chip"><span>${escapeHtml(txt.get(v)||v)}</span><button data-v="${escapeHtml(v)}" aria-label="Quitar">×</button></span>`
+      ).join("");
+      input.placeholder = seleccion.size ? "" : placeholder;
+    }
+    const abrir = ()=>{ panel.hidden=false; renderPanel(input.value); };
+    const cerrar = ()=>{ panel.hidden=true; };
+
+    control.addEventListener("click",(e)=>{ if(e.target.tagName!=="BUTTON"){ input.focus(); abrir(); }});
+    input.addEventListener("input",()=>{ abrir(); renderPanel(input.value); });
+    panel.addEventListener("change",(e)=>{
+      if(e.target.type==="checkbox"){
+        if(e.target.checked) seleccion.add(e.target.value); else seleccion.delete(e.target.value);
+        renderChips(); onChange();
+      }
+    });
+    panel.addEventListener("click",(e)=>{
+      const a = e.target.dataset && e.target.dataset.a;
+      if(!a) return;
+      const vis = visibles(input.value);
+      if(a==="todos") vis.forEach((o)=>seleccion.add(o.v));
+      else vis.forEach((o)=>seleccion.delete(o.v));
+      renderChips(); renderPanel(input.value); onChange();
+    });
+    chips.addEventListener("click",(e)=>{
+      if(e.target.tagName==="BUTTON"){ seleccion.delete(e.target.dataset.v); renderChips(); renderPanel(input.value); onChange(); }
+    });
+    document.addEventListener("click",(e)=>{ if(!cont.contains(e.target)) cerrar(); });
+
+    renderChips();
+    return { seleccion, limpiar(){ seleccion.clear(); input.value=""; renderChips(); cerrar(); } };
+  }
+
+  // ----- Agregados -----
+  function totalDe(regs){ return regs.reduce((s,r)=>s+r.imp,0); }
+  function agregarPorMes(regs){
+    const m = new Map();
+    for (const r of regs) m.set(r.m,(m.get(r.m)||0)+r.imp);
+    return MESES.filter((mm)=>m.has(mm.key)).map((mm)=>({key:mm.key,label:mm.label,total:m.get(mm.key)}));
+  }
+  function agregarPorDim(regs, dim){
+    const m = new Map();
+    for (const r of regs){ const k=r[dim]; m.set(k,(m.get(k)||0)+r.imp); }
+    return m; // Map<indice, total>
+  }
+
+  // Cantidad de operaciones = comprobantes distintos.
+  function contarOps(regs){ const s=new Set(); for(const r of regs) s.add(r.o); return s.size; }
+
+  // ----- KPIs -----
+  function renderKpis(regs){
+    const total = totalDe(regs);
+    const ops = contarOps(regs);
+    const clientes = new Set(regs.map((r)=>r.c)).size;
+    const porV = agregarPorDim(regs,"v");
+    let topV=null, topVt=-Infinity;
+    for (const [k,v] of porV) if (v>topVt){ topVt=v; topV=k; }
+    let rango="—";
+    if (regs.length){ const f=regs.map((r)=>r.f).sort(); rango=fechaLarga(f[0])+" – "+fechaLarga(f[f.length-1]); }
+    const cards = [
+      { label:"Ventas totales", value:miles(total), hint:`en miles de USD · ${rango}` },
+      { label:"Comprobantes", value:fmtEntero.format(ops), hint:"operaciones distintas" },
+      { label:"Clientes distintos", value:fmtEntero.format(clientes), hint:"&nbsp;" },
+      { label:"Vendedor principal", value: topV!=null?VENDEDORES[topV]:"—", small:true, hint: topV!=null?money(topVt):"&nbsp;" },
+    ];
+    document.getElementById("kpis").innerHTML = cards.map((c)=>`
+      <div class="card kpi"><div class="label">${c.label}</div>
+        <div class="value${c.small?" small":""}">${escapeHtml(c.value)}</div>
+        <div class="hint">${c.hint}</div></div>`).join("");
+  }
+
+  // ----- Gráficos -----
+  let chMes=null, chTop=null, chComp=null;
+  function opcionesBase(pal, horizontal){
+    const valueAxis = horizontal?"x":"y", catAxis = horizontal?"y":"x", scales={};
+    scales[valueAxis] = { grid:{color:pal.grid,drawBorder:false}, border:{display:false}, ticks:{color:pal.muted, callback:(v)=>compact(v)} };
+    scales[catAxis] = { grid:{display:false,drawBorder:false}, border:{color:pal.grid}, ticks:{color:pal.texto2} };
+    return { responsive:true, maintainAspectRatio:false, indexAxis:horizontal?"y":"x", animation:false, scales,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:function(ctx){
+        const horiz = ctx.chart.options.indexAxis==="y";
+        const val = horiz?ctx.parsed.x:ctx.parsed.y;
+        return money(val);
+      }}}}};
+  }
+  function truncar(t,n){ return t.length>n?t.slice(0,n-1)+"…":t; }
+
+  function construirGraficos(regs){
+    const pal = leerPaleta();
+    if (chMes) chMes.destroy();
+    if (chTop) chTop.destroy();
+
+    const porMes = agregarPorMes(regs);
+    chMes = new Chart(document.getElementById("chartMes"), {
+      type:"bar",
+      data:{ labels:porMes.map((m)=>m.label), datasets:[{ data:porMes.map((m)=>m.total),
+        backgroundColor:pal.serie[0], borderRadius:4, borderSkipped:false, maxBarThickness:46, categoryPercentage:0.7, barPercentage:0.85 }] },
+      options:opcionesBase(pal,false),
+    });
+
+    // Top 15 de la dimensión activa
+    const dim = estado.dim;
+    const cat = CAT[dim];
+    const agg = Array.from(agregarPorDim(regs,dim),([k,v])=>({name:cat[k],total:v})).sort((a,b)=>b.total-a.total).slice(0,15);
+    document.getElementById("chartTopTit").textContent = "Top 15 — " + DIM_LABEL[dim];
+    chTop = new Chart(document.getElementById("chartTop"), {
+      type:"bar",
+      data:{ labels:agg.map((c)=>truncar(c.name,26)), datasets:[{ data:agg.map((c)=>c.total),
+        backgroundColor:pal.serie[0], borderRadius:4, borderSkipped:false, maxBarThickness:18, categoryPercentage:0.8, barPercentage:0.9 }] },
+      options:(function(){ const o=opcionesBase(pal,true);
+        o.plugins.tooltip.callbacks.title=(items)=>items.length?agg[items[0].dataIndex].name:""; return o; })(),
+    });
+  }
+
+  // ----- Formato contable (enteros; negativos entre paréntesis) -----
+  const fmtCuadro = new Intl.NumberFormat("es-AR");
+  const pesos = (v)=>{ const r=Math.round(v||0); if(!r) return null; return r<0?"("+fmtCuadro.format(-r)+")":fmtCuadro.format(r); };
+  const celdaHtml = (v)=> v ? `<td class="num${v<0?" neg":""}">${pesos(v)}</td>` : `<td class="num cero">–</td>`;
+  function filaPivot(labelHtml, valores, total, cls){
+    return `<tr class="${cls}"><td>${labelHtml}</td>`+valores.map(celdaHtml).join("")+`<td class="num tot">${total?pesos(total):"–"}</td></tr>`;
+  }
+  function colsMesesDesc(regs){ return MESES.filter((m)=>regs.some((r)=>r.m===m.key)).slice().reverse(); }
+  function bandaAniosHtml(cols){
+    const g=[]; for(const c of cols){ const a=c.key.slice(0,4); const u=g[g.length-1]; if(u&&u.anio===a)u.n++; else g.push({anio:a,n:1}); }
+    return g.map((x)=>`<th class="anio" colspan="${x.n}">${x.anio}</th>`).join("");
+  }
+  function filaMesesHtml(cols){ return cols.map((c)=>`<th class="mes">${MESES_LARGO[parseInt(c.key.slice(5,7),10)-1]}</th>`).join(""); }
+
+  // ----- Cuadro dinámico: Ventas por [dim] y mes -----
+  function renderPivotDim(regs){
+    const thead=document.getElementById("p-thead"), tbody=document.getElementById("p-tbody"), tfoot=document.getElementById("p-tfoot");
+    const dim = estado.dim, cat = CAT[dim];
+    document.getElementById("sub-pivot").textContent =
+      `Importes en USD (enteros) · ${DIM_LABEL[dim]} — ordenado ${dim==="cp"?"por plazo (días)":"de mayor a menor"}`;
+    if (!regs.length){ thead.innerHTML=""; tfoot.innerHTML=""; tbody.innerHTML=`<tr><td class="vacio">Sin datos para los filtros.</td></tr>`; return; }
+    const cols = colsMesesDesc(regs);
+
+    // matriz indice -> mesKey -> total
+    const mat = new Map();
+    for (const r of regs){ const k=r[dim]; if(!mat.has(k)) mat.set(k,new Map()); const f=mat.get(k); f.set(r.m,(f.get(r.m)||0)+r.imp); }
+    let filas = Array.from(mat.keys()).map((k)=>{
+      const cruda=mat.get(k); const valores=cols.map((c)=>Math.round(cruda.get(c.key)||0));
+      return { k, valores, total:valores.reduce((s,v)=>s+v,0) };
+    });
+    if (dim==="cp"){
+      filas.sort((a,b)=>{ const da=CONDICIONES[a.k].d, db=CONDICIONES[b.k].d;
+        const ka=(da==null)?[1,0]:[0,da], kb=(db==null)?[1,0]:[0,db];
+        return ka[0]-kb[0] || ka[1]-kb[1]; });
+    } else { filas.sort((a,b)=>b.total-a.total); }
+
+    const totalesCol = cols.map((_,j)=>filas.reduce((s,f)=>s+f.valores[j],0));
+    const totalGeneral = totalesCol.reduce((s,v)=>s+v,0);
+
+    thead.innerHTML = `<tr><th class="corner" rowspan="2">${DIM_LABEL[dim]} (USD)</th>${bandaAniosHtml(cols)}<th class="tot" rowspan="2">Total</th></tr><tr>${filaMesesHtml(cols)}</tr>`;
+    tbody.innerHTML = filas.map((f)=>filaPivot(escapeHtml(cat[f.k]), f.valores, f.total, "concepto")).join("");
+    tfoot.innerHTML = filaPivot("TOTAL", totalesCol, totalGeneral, "total");
+  }
+
+  // ----- Ventas por mes × año -----
+  function renderPorMesAnio(regs){
+    const thead=document.getElementById("m-thead"), tbody=document.getElementById("m-tbody"), tfoot=document.getElementById("m-tfoot");
+    if (!regs.length){ thead.innerHTML=""; tfoot.innerHTML=""; tbody.innerHTML=`<tr><td class="vacio">Sin datos.</td></tr>`; return; }
+    const anios = Array.from(new Set(regs.map((r)=>r.m.slice(0,4)))).sort();
+    const mat = new Map(); // mesNum -> anio -> total
+    for (const r of regs){ const mn=parseInt(r.m.slice(5,7),10), a=r.m.slice(0,4);
+      if(!mat.has(mn)) mat.set(mn,new Map()); const f=mat.get(mn); f.set(a,(f.get(a)||0)+r.imp); }
+    const mesesNum = Array.from(mat.keys()).sort((a,b)=>a-b);
+    thead.innerHTML = `<tr><th class="corner">Mes</th>${anios.map((a)=>`<th class="mes">${a}</th>`).join("")}<th class="tot">Total</th></tr>`;
+    const totCol = {}; anios.forEach((a)=>totCol[a]=0); let totG=0;
+    tbody.innerHTML = mesesNum.map((mn)=>{
+      const valores = anios.map((a)=>{ const v=Math.round(mat.get(mn).get(a)||0); totCol[a]+=v; return v; });
+      const t=valores.reduce((s,v)=>s+v,0); totG+=t;
+      return filaPivot(MESES_LARGO[mn-1], valores, t, "concepto");
+    }).join("");
+    tfoot.innerHTML = filaPivot("TOTAL", anios.map((a)=>totCol[a]), totG, "total");
+  }
+
+  // ----- Cantidades por producto -----
+  function renderCantidades(regs){
+    const thead=document.getElementById("q-thead"), tbody=document.getElementById("q-tbody"), tfoot=document.getElementById("q-tfoot");
+    if (!regs.length){ thead.innerHTML=""; tfoot.innerHTML=""; tbody.innerHTML=`<tr><td class="vacio">Sin datos.</td></tr>`; return; }
+    const cols = colsMesesDesc(regs);
+    const mat = new Map();
+    for (const r of regs){ if(!mat.has(r.p)) mat.set(r.p,new Map()); const f=mat.get(r.p); f.set(r.m,(f.get(r.m)||0)+r.q); }
+    let filas = Array.from(mat.keys()).map((k)=>{ const cruda=mat.get(k);
+      const valores=cols.map((c)=>Math.round(cruda.get(c.key)||0)); return {k,valores,total:valores.reduce((s,v)=>s+v,0)}; });
+    filas.sort((a,b)=>b.total-a.total);
+    const totalesCol = cols.map((_,j)=>filas.reduce((s,f)=>s+f.valores[j],0));
+    const totG = totalesCol.reduce((s,v)=>s+v,0);
+    thead.innerHTML = `<tr><th class="corner" rowspan="2">Producto (unidades)</th>${bandaAniosHtml(cols)}<th class="tot" rowspan="2">Total</th></tr><tr>${filaMesesHtml(cols)}</tr>`;
+    tbody.innerHTML = filas.map((f)=>filaPivot(escapeHtml(PRODUCTOS[f.k]), f.valores, f.total, "concepto")).join("");
+    tfoot.innerHTML = filaPivot("TOTAL", totalesCol, totG, "total");
+  }
+
+  // ----- Precios por producto (promedio ponderado por USD) -----
+  function renderPrecios(regs){
+    const thead=document.getElementById("pr-thead"), tbody=document.getElementById("pr-tbody"), tfoot=document.getElementById("pr-tfoot");
+    if (!regs.length){ thead.innerHTML=""; tfoot.innerHTML=""; tbody.innerHTML=`<tr><td class="vacio">Sin datos.</td></tr>`; return; }
+    const cols = colsMesesDesc(regs);
+    const num=new Map(), den=new Map();  // producto -> mes -> Σ(pu*imp) / Σ(imp)
+    for (const r of regs){
+      if(!num.has(r.p)){ num.set(r.p,new Map()); den.set(r.p,new Map()); }
+      const n=num.get(r.p), d=den.get(r.p);
+      n.set(r.m,(n.get(r.m)||0)+r.pu*r.imp); d.set(r.m,(d.get(r.m)||0)+r.imp);
+    }
+    const prodTotV = new Map(); for(const r of regs) prodTotV.set(r.p,(prodTotV.get(r.p)||0)+r.imp);
+    let prods = Array.from(num.keys()).sort((a,b)=>(prodTotV.get(b)||0)-(prodTotV.get(a)||0));
+    const celdaP = (v)=> (v==null||!isFinite(v)) ? `<td class="num cero">–</td>` : `<td class="num">${fmtCuadro.format(Math.round(v*100)/100)}</td>`;
+    thead.innerHTML = `<tr><th class="corner" rowspan="2">Producto (USD/u)</th>${bandaAniosHtml(cols)}<th class="tot" rowspan="2">Prom.</th></tr><tr>${filaMesesHtml(cols)}</tr>`;
+    tbody.innerHTML = prods.map((p)=>{
+      const n=num.get(p), d=den.get(p);
+      const celdas = cols.map((c)=>{ const dd=d.get(c.key)||0; return celdaP(dd?n.get(c.key)/dd:null); }).join("");
+      let tn=0, td=0; for(const c of cols){ tn+=n.get(c.key)||0; td+=d.get(c.key)||0; }
+      const prom = td?tn/td:null;
+      const promHtml = (prom==null||!isFinite(prom))?`<td class="num tot cero">–</td>`:`<td class="num tot">${fmtCuadro.format(Math.round(prom*100)/100)}</td>`;
+      return `<tr><td>${escapeHtml(PRODUCTOS[p])}</td>${celdas}${promHtml}</tr>`;
+    }).join("");
+    tfoot.innerHTML = "";
+  }
+
+  // ----- Plazos por producto -----
+  function renderPlazos(regs){
+    const thead=document.getElementById("pl-thead"), tbody=document.getElementById("pl-tbody");
+    // sólo condiciones numéricas (d != null)
+    const numer = regs.filter((r)=>CONDICIONES[r.cp].d!=null);
+    if (!numer.length){ thead.innerHTML=""; tbody.innerHTML=`<tr><td class="vacio">Sin ventas con plazo numérico para los filtros.</td></tr>`; return; }
+    const porProd = new Map();
+    for (const r of numer){ if(!porProd.has(r.p)) porProd.set(r.p,[]); porProd.get(r.p).push(r); }
+    const filas = [];
+    for (const [p,rs] of porProd){
+      const pmax = Math.max(...rs.map((r)=>CONDICIONES[r.cp].d));
+      const sel = rs.filter((r)=>CONDICIONES[r.cp].d===pmax);
+      const clientes = Array.from(new Set(sel.map((r)=>CLIENTES[r.c]))).sort();
+      const cant = sel.reduce((s,r)=>s+r.q,0);
+      const den = sel.reduce((s,r)=>s+r.imp,0);
+      const pu = den? sel.reduce((s,r)=>s+r.pu*r.imp,0)/den : (sel.reduce((s,r)=>s+r.pu,0)/sel.length);
+      filas.push({ prod:PRODUCTOS[p], pmax, clientes, cant, pu });
+    }
+    filas.sort((a,b)=>b.pmax-a.pmax || b.cant-a.cant);
+    thead.innerHTML = `<tr><th class="corner">Producto</th><th class="mes">Plazo máx (días)</th><th style="text-align:left">Clientes a ese plazo</th><th class="mes">Cantidad</th><th class="mes">Precio unit. (USD)</th></tr>`;
+    tbody.innerHTML = filas.map((f)=>`<tr>
+      <td>${escapeHtml(f.prod)}</td>
+      <td class="num">${f.pmax}</td>
+      <td class="txt">${escapeHtml(f.clientes.join(", "))}</td>
+      <td class="num">${fmtCuadro.format(Math.round(f.cant))}</td>
+      <td class="num">${fmtCuadro.format(Math.round(f.pu*100)/100)}</td></tr>`).join("");
+  }
+
+  // ----- Comparativo por año (barras agrupadas: x=mes, una serie por año) -----
+  function renderComparativo(regs){
+    const pal = leerPaleta();
+    if (chComp) { chComp.destroy(); chComp = null; }
+    if (!regs.length) return;
+
+    // año -> mesNum(1..12) -> total
+    const porAnio = new Map();
+    const mesesPres = new Set();
+    for (const r of regs){
+      const a = r.m.slice(0,4), mn = parseInt(r.m.slice(5,7),10);
+      if(!porAnio.has(a)) porAnio.set(a, new Map());
+      const f = porAnio.get(a); f.set(mn,(f.get(mn)||0)+r.imp);
+      mesesPres.add(mn);
+    }
+    const anios = Array.from(porAnio.keys()).sort();
+    const meses = Array.from(mesesPres).sort((a,b)=>a-b);
+    const labels = meses.map((mn)=>MESES_LARGO[mn-1]);
+
+    const nota = document.getElementById("comp-nota");
+    nota.textContent = anios.length>1
+      ? `Comparando ${anios.length} años (${anios.join(" · ")}) mes a mes · importes en USD`
+      : `Un solo año en el filtro (${anios[0]||"—"}) · seleccioná varios años arriba para compararlos`;
+
+    const datasets = anios.map((a,i)=>({
+      label: a,
+      data: meses.map((mn)=>Math.round(porAnio.get(a).get(mn)||0)),
+      backgroundColor: pal.serie[i % pal.serie.length],
+      borderRadius: 4, borderSkipped:false, maxBarThickness: 34,
+      categoryPercentage: 0.75, barPercentage: 0.9,
+    }));
+
+    chComp = new Chart(document.getElementById("chartComp"), {
+      type:"bar",
+      data:{ labels, datasets },
+      options:{
+        responsive:true, maintainAspectRatio:false, animation:false,
+        interaction:{ mode:"index", intersect:false },
+        scales:{
+          x:{ grid:{display:false}, ticks:{color:pal.texto2} },
+          y:{ grid:{color:pal.grid, drawBorder:false}, border:{display:false}, ticks:{color:pal.muted, callback:(v)=>compact(v)} },
+        },
+        plugins:{
+          legend:{ position:"bottom", labels:{color:pal.texto2, usePointStyle:true, boxWidth:8} },
+          tooltip:{ callbacks:{ label:(ctx)=> ctx.dataset.label + ": " + money(ctx.parsed.y) } },
+        },
+      },
+    });
+  }
+
+  // ----- Contador -----
+  function renderContador(regs){
+    document.getElementById("contador").textContent =
+      `${fmtEntero.format(contarOps(regs))} de ${fmtEntero.format(META.total_ops)} comprobantes`;
+  }
+
+  function render(){
+    const regs = registrosFiltrados();
+    renderKpis(regs);
+    renderContador(regs);
+    construirGraficos(regs);
+    renderPivotDim(regs);
+    renderPorMesAnio(regs);
+    renderCantidades(regs);
+    renderPrecios(regs);
+    renderPlazos(regs);
+    renderComparativo(regs);
+  }
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+  function initUI(){
+    document.getElementById("subheader").innerHTML =
+      `Moneda: Dólares (USD) · ${fmtEntero.format(META.total_ops)} comprobantes · ${fmtEntero.format(META.n_registros)} líneas · Actualizado: ${META.generado}`;
+
+    // Año y Mes: multi-selección (chips), igual que Vendedor/Cliente/Producto.
+    const anios=Array.from(new Set(MESES.map((m)=>m.key.slice(0,4)))).sort();
+    MS.anio = crearMultiSelect("ms-anio", anios, "Todos los años", render);
+    const mesesNum=Array.from(new Set(MESES.map((m)=>m.key.slice(5,7)))).sort();
+    const mesItems=mesesNum.map((n)=>({v:n, t:MESES_LARGO[parseInt(n,10)-1]}));
+    MS.mes = crearMultiSelect("ms-mes", mesItems, "Todos los meses", render);
+
+    const desde=document.getElementById("f-desde"), hasta=document.getElementById("f-hasta");
+    desde.min=hasta.min=META.rango_min; desde.max=hasta.max=META.rango_max;
+    desde.onchange=()=>{ estado.desde=desde.value; render(); };
+    hasta.onchange=()=>{ estado.hasta=hasta.value; render(); };
+
+    MS.v = crearMultiSelect("ms-vendedor", VENDEDORES, "Todos los vendedores…", render);
+    MS.c = crearMultiSelect("ms-cliente", CLIENTES, "Buscar cliente…", render);
+    MS.p = crearMultiSelect("ms-producto", PRODUCTOS, "Buscar producto…", render);
+
+    const dimSel=document.getElementById("dim-select");
+    dimSel.onchange=()=>{ estado.dim=dimSel.value; render(); };
+
+    document.getElementById("f-limpiar").onclick=()=>{
+      estado.desde=""; estado.hasta="";
+      desde.value=""; hasta.value="";
+      MS.anio.limpiar(); MS.mes.limpiar(); MS.v.limpiar(); MS.c.limpiar(); MS.p.limpiar();
+      render();
+    };
+
+    if (window.matchMedia){
+      const mq=window.matchMedia("(prefers-color-scheme: dark)");
+      const onTheme=()=>{ const g=registrosFiltrados(); construirGraficos(g); renderComparativo(g); };
+      if (mq.addEventListener) mq.addEventListener("change",onTheme);
+      else if (mq.addListener) mq.addListener(onTheme);
+    }
+  }
+
+  initUI();
+  render();
+})();
+</script>
+
+</html>

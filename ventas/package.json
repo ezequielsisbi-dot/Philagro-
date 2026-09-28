@@ -1,0 +1,12 @@
+{
+  "name": "dashboard-ventas-philagro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard de ventas de agroinsumos: Chart.js se vendoriza inline en el HTML generado; Playwright se usa solo para verificar.",
+  "scripts": {
+    "verificar": "node verificar_ventas.mjs"
+  },
+  "dependencies": {
+    "chart.js": "4.5.1"
+  }
+}
